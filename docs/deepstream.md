@@ -102,7 +102,7 @@ there is no per-frame `memcpy` and no format conversion. That is a real change t
 
 **What can be said:** at a single stream with a fixed batch-1 engine, E2 sustains
 **653 fps** in capacity mode against a source-bound 45 fps — so the source, not
-DeepStream, was the limit in the [E1/E2 tables above](#e2--multi-stream-batched).
+DeepStream, was the limit in the [E1/E2 tables above](#e2-multi-stream-batched).
 That much the exercise did establish. See [roadmap](roadmap.md).
 
 ## Verdict

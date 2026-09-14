@@ -25,6 +25,9 @@ that is really the queue:
 
 Script: [`d_decompose.sh`](../scripts/d_decompose.sh) → raw data:
 [`results/v3/d_latency_decomposition.tsv`](../results/v3/d_latency_decomposition.tsv).
+Figure: [`plot_page_figs.py`](../scripts/plot_page_figs.py).
+
+![D's client latency, stacked: server queue, server inference, and the client's own in-flight window, with Little's law overlaid](img/batching-contention.png)
 
 **At concurrency 4, the batching queue accounts for 5.5% of the latency.** The
 other 94.5% is not the server waiting for batch-mates.
@@ -57,7 +60,7 @@ the *mechanism* was mislabelled: the cost is pipelining depth, not queue time.
 It does change one practical thing. If D's latency is what rules it out for you,
 the lever is **`DEPTH`**, which is a client constant, not
 `max_queue_delay_microseconds`, which is where you would naturally reach first
-and which [the knob sweep](#the-knobs) already showed barely moves anything.
+and which [the knob sweep](#the-batching-knobs-swept) already showed barely moves anything.
 
 ### One number that does not fit
 

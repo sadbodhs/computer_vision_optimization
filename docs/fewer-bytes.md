@@ -50,9 +50,9 @@ Per batch of 8:
 
 | Batch-8 engine | H2D | GPU compute | D2H |
 |---|---:|---:|---:|
-| FP32 in, FP32 out | 1.4741 ms | 4.8494 ms | 0.8502 ms |
-| UINT8 in | **0.3730 ms** | 4.8799 ms | 0.8489 ms |
-| + FP16 out | 0.3722 ms | 4.8413 ms | **0.4309 ms** |
+| FP32 in, FP32 out | 1.474 ms | 4.849 ms | 0.850 ms |
+| UINT8 in | **0.373 ms** | 4.880 ms | 0.849 ms |
+| + FP16 out | 0.372 ms | 4.841 ms | **0.431 ms** |
 
 H2D improves **3.95x** here against 3.72x at batch 1 — closer to the theoretical
 4x, because batching amortises the fixed per-transfer cost over 8x the bytes.
@@ -110,6 +110,8 @@ change, on the same GPU, with the same engine: **+87.6% on B1, 0% on D.**
 
 That is the study's central rule in its sharpest form yet. The lever is not good
 or bad; it is good exactly where the thing it shrinks was the constraint.
+
+![FP32 vs UINT8 input per flow: +87.6% where the wire is the constraint, 0% at the engine ceiling](img/fewer-bytes-flows.png)
 
 ## Hidden in the middle, exposed at both ends
 

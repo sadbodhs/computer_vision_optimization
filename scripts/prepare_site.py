@@ -94,7 +94,7 @@ for sub in ("img",):
 # served at <page>/index.html, one level down. Assert it rather than trust it.
 CHART = (
     '<div id="pareto-chart" style="width:100%; height:540px;"></div>\n'
-    '<script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>\n'
+    '<script src="../img/plotly-2.35.2.min.js" charset="utf-8"></script>\n'
     '<script src="../img/pareto_chart.js"></script>'
 )
 CAPTION = (
@@ -135,9 +135,51 @@ if INDEX_PNG in overview_md:
 else:
     print("WARNING: overview hero PNG not matched - it will stay static")
 
+
+# The site LANDS on the introduction (index.md), so it needs the hero chart
+# most of all. It is served at the site root, so the asset src has no ../.
+ROOT_CHART = (
+    '<div id="pareto-chart" style="width:100%; height:540px;"></div>\n'
+    '<script src="img/plotly-2.35.2.min.js" charset="utf-8"></script>\n'
+    '<script src="img/pareto_chart.js"></script>'
+)
+index_md = os.path.join(OUT, "index.md")
+if os.path.exists(index_md):
+    _t = open(index_md, encoding="utf-8").read()
+    # insert the hero under the first paragraph break, so the visitor sees it
+    # before any wall of text
+    parts = _t.split("\n---\n", 1)
+    if len(parts) == 2:
+        _t = parts[0] + "\n---\n\n" + ROOT_CHART + "\n\n" + parts[1]
+        open(index_md, "w", encoding="utf-8").write(_t)
+        print("hero chart inserted into the landing page")
+    else:
+        print("WARNING: index.md has no --- separator; hero not inserted")
+
 open(os.path.join(OUT, README_PAGE), "w", encoding="utf-8").write(overview_md)
 
 for _p in ("results.md", README_PAGE):
     assert _p != "index.md", "the chart src assumes depth 1, not the site root"
+
+
+# --- social preview metadata on every page ---------------------------------
+# Material does not emit og:image by default; link-preview crawlers (GitHub, X,
+# Slack) read og: meta from the served HTML. The page <head> is generated, but
+# meta tags in the markdown body are honoured by the major crawlers, and this
+# is the only hook that needs no MkDocs plugin.
+SITE = "https://sadbodhs.github.io/computer_vision_optimization"
+OG_BLOCK = (
+    '<meta property="og:title" content="Triton vs TensorRT vs DeepStream"/>\n'
+    '<meta property="og:description" content="Measured comparison of CV '
+    'inference serving pipelines on an RTX 3090"/>\n'
+    '<meta property="og:image" content="%s/img/pareto-latency-throughput.png"/>\n'
+    '<meta name="twitter:card" content="summary_large_image"/>\n' % SITE
+)
+for _name in os.listdir(OUT):
+    if not _name.endswith(".md"):
+        continue
+    _p = os.path.join(OUT, _name)
+    _t = open(_p, encoding="utf-8").read()
+    open(_p, "w", encoding="utf-8").write(_t.rstrip() + "\n\n" + OG_BLOCK)
 
 print(f"staged {n} docs (introduction -> index.md) + {README_PAGE} into {OUT}")

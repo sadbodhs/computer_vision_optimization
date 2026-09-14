@@ -16,6 +16,8 @@ scripts: [`mps_contention.sh`](../scripts/mps_contention.sh),
 
 ## The measurements
 
+![Latency of A2 and B2 as instances share the GPU, without MPS (left) and with MPS at N=3 (right)](img/contention-scaling.png)
+
 N independent pipeline instances on one GPU, capacity mode, yolov8s FP16. Each
 instance measures its own per-frame latency.
 
