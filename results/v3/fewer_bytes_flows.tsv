@@ -1,0 +1,4 @@
+flow	input_dtype	payload_mb	throughput	latency_us	source
+B1_rawgrpc	fp32	4.92	179.3	3787	perf_analyzer conc=1
+B1_rawgrpc	uint8	1.23	336.3	2226	perf_analyzer conc=1
+D_batch8	fp32	4.92	1665	n/a	already at 1650 fps engine ceiling - 0% possible

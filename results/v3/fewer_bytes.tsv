@@ -1,0 +1,7 @@
+config	batch	h2d_ms	gpu_ms	d2h_ms	qps	note
+fp32_in_fp32_out	1	0.1896	0.9792	0.1107	1019.0	baseline: every flow today
+uint8_in_fp32_out	1	0.0509	0.9750	0.1107	1023.4	in-graph /255, folded into first conv
+uint8_in_fp16_out	1	0.0510	0.9678	0.0581	1031.0	both levers
+fp32_in_fp32_out	8	1.4741	4.8494	0.8502	205.8	per batch; D uses this
+uint8_in_fp32_out	8	0.3730	4.8799	0.8489	204.5	H2D 3.95x - batching amortises fixed cost
+uint8_in_fp16_out	8	0.3722	4.8413	0.4309	206.2	per batch

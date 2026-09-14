@@ -1,6 +1,6 @@
 # Transport — which shared memory, and when
 
-[← index](../README.md) · prev: [DeepStream](deepstream.md) · next: [Stage decomposition](stage-decomposition.md)
+[← index](../README.md) · prev: [DeepStream](deepstream.md) · next: [Moving fewer bytes](fewer-bytes.md)
 
 The question: once your frames are preprocessed, how do you get them into the
 server without paying for it twice?
@@ -70,4 +70,4 @@ race that invalidated the N≥4 in-process numbers. See
 
 ---
 
-[← index](../README.md) · prev: [DeepStream](deepstream.md) · next: [Stage decomposition](stage-decomposition.md)
+[← index](../README.md) · prev: [DeepStream](deepstream.md) · next: [Moving fewer bytes](fewer-bytes.md)

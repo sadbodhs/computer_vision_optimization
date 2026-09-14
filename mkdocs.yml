@@ -53,6 +53,7 @@ nav:
     - DeepStream: deepstream.md
   - Where the time goes:
     - Transport: transport.md
+    - Moving fewer bytes: fewer-bytes.md
     - Stage decomposition: stage-decomposition.md
     - Model cost: model-scaling.md
     - Across architectures: model-zoo.md

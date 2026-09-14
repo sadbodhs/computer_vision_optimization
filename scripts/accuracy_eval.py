@@ -37,7 +37,7 @@ COCO_IDS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 19, 20, 2
             85, 86, 87, 88, 89, 90]
 
 
-def letterbox(img_bgr, resize="linear"):
+def letterbox(img_bgr, resize="linear", dtype="float32"):
     """BGR uint8 HxWx3 -> ([1,3,640,640] float32, scale, pad_x, pad_y).
 
     Same geometry as the benchmark flows: centered, pad 114, BGR->RGB, /255.
@@ -51,8 +51,17 @@ def letterbox(img_bgr, resize="linear"):
     canvas = np.full((IMG, IMG, 3), 114, dtype=np.uint8)
     px, py = (IMG - nw) // 2, (IMG - nh) // 2
     canvas[py:py + nh, px:px + nw] = resized
-    rgb = canvas[:, :, ::-1].astype(np.float32) / 255.0     # BGR->RGB, /255
-    chw = np.ascontiguousarray(rgb.transpose(2, 0, 1))[None]  # 1,3,640,640
+    rgb = canvas[:, :, ::-1]                                # BGR->RGB
+    if dtype == "uint8":
+        # Ship 8-bit and let the graph do the /255 (scripts/fold_norm.py).
+        # NOTE this is bit-exact, not an approximation: cv2.resize on a uint8
+        # image already returns uint8, so the rounding happens above either way.
+        # The only thing that moves is WHERE the divide runs - and it is 4x less
+        # to send, 4.92 MB -> 1.23 MB.
+        chw = np.ascontiguousarray(rgb.transpose(2, 0, 1))[None]
+    else:
+        f = rgb.astype(np.float32) / 255.0
+        chw = np.ascontiguousarray(f.transpose(2, 0, 1))[None]
     return chw, scale, px, py
 
 
@@ -127,6 +136,8 @@ def main():
     ap.add_argument("--conf", type=float, default=0.001)
     ap.add_argument("--iou", type=float, default=0.45, help="NMS IoU (flows use 0.45)")
     ap.add_argument("--resize", default="linear", choices=["linear", "nearest"])
+    ap.add_argument("--dtype", default="float32", choices=["float32", "uint8"],
+                    help="uint8 ships 8-bit and lets the graph normalise")
     ap.add_argument("--out", default="")
     args = ap.parse_args()
 
@@ -149,9 +160,11 @@ def main():
         if img is None:
             continue
         h0, w0 = img.shape[:2]
-        tensor, scale, px, py = letterbox(img, args.resize)
+        tensor, scale, px, py = letterbox(img, args.resize, args.dtype)
 
-        inp = [grpcclient.InferInput("images", [1, 3, IMG, IMG], "FP32")]
+        iname = "images_u8" if args.dtype == "uint8" else "images"
+        itype = "UINT8" if args.dtype == "uint8" else "FP32"
+        inp = [grpcclient.InferInput(iname, [1, 3, IMG, IMG], itype)]
         inp[0].set_data_from_numpy(tensor)
         res = client.infer(args.model, inp,
                            outputs=[grpcclient.InferRequestedOutput("output0")])
