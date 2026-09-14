@@ -1,0 +1,4 @@
+config	streams	latency_p50_ms	throughput_qps	note
+fp32_in_fp32_out	1	1.2859	1010.1	single request in flight, nothing pipelined
+uint8_in_fp32_out	1	1.1255	1033.3	in-graph /255
+uint8_in_fp16_out	1	1.0763	1030.0	both levers: -16.3% latency, +2.0% throughput

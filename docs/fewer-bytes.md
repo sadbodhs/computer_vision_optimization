@@ -111,6 +111,86 @@ change, on the same GPU, with the same engine: **+87.6% on B1, 0% on D.**
 That is the study's central rule in its sharpest form yet. The lever is not good
 or bad; it is good exactly where the thing it shrinks was the constraint.
 
+## Hidden in the middle, exposed at both ends
+
+The engine-level throughput barely moved (+1.2%) while B1 nearly doubled, and
+those look contradictory until you separate **latency** from **throughput**.
+
+Single stream, one request at a time, nothing pipelined — the single-instance
+case:
+
+| | latency p50 | throughput |
+|---|---:|---:|
+| FP32 in, FP32 out | 1.2859 ms | 1010.1 qps |
+| UINT8 in | 1.1255 ms | 1033.3 qps |
+| **UINT8 in + FP16 out** | **1.0763 ms** | 1030.0 qps |
+| | **−16.3%** | +2.0% |
+
+**Latency falls 16.3%; throughput does not move.** With one request in flight
+there is nothing to hide the copy behind, so the saving lands in full on the
+frame. Add pipelining and request A's transfer overlaps request B's compute, and
+the same saving becomes invisible.
+
+Note the two numbers that are easily confused. The **transfer** is 3.72x cheaper.
+The **frame** is 16.3% cheaper — because transport was 0.300 ms of a 1.286 ms
+frame, 23.4%, and removing three quarters of 23.4% leaves ~16%. Quote the second
+to a user; the first is an implementation detail.
+
+So the benefit is not simply "large at low concurrency, shrinking as concurrency
+rises". It is **U-shaped**:
+
+| Regime | Example | Benefit |
+|---|---|---:|
+| Single inference, latency-bound | one camera, closed loop | **−16.3% latency** |
+| Pipelined, compute-bound | D at batch-8 | **0%** |
+| Payload- or bandwidth-bound | B1 raw gRPC; PCIe saturated | **+87.6%** |
+
+Copies are shared until the bus itself becomes the constraint. D currently moves
+~12.9 GB/s on a ~24 GB/s PCIe 4.0 link — about half. Add streams, add models, or
+put a second pipeline on the same card, and the bytes stop being free again.
+
+## Which models benefit: input bytes per millisecond of compute
+
+The intuitive answer — "models with big inputs" — is wrong. **SAM ViT-H has the
+largest input in the whole sweep at 12.58 MB, 2.5x a YOLO frame, and benefits
+least of anything measured (0.4%).**
+
+The predictor is input size *relative to compute*:
+
+| Best candidates | MB/ms | saves |
+|---|---:|---:|
+| YOLO11n | 6.11 | **12.5%** |
+| YOLO11n-seg | 5.26 | 9.9% |
+| YOLOv8s | 4.98 | 10.8% |
+| DeepLabV3-MNv3 | 4.39 | 5.7% |
+
+| Worst candidates | MB/ms | saves |
+|---|---:|---:|
+| DINOv2-L | 0.24 | 0.7% |
+| Depth Anything V2-L | 0.19 | 0.6% |
+| SAM ViT-H | 0.15 | **0.4%** |
+
+### A 3D CNN is a *worse* candidate than a 2D detector
+
+Worth testing, because the intuition that video models — many frames per
+inference — should benefit most is a reasonable one. They do not.
+
+| `r3d_18`, 16 frames at 112x112 | H2D | GPU compute | H2D share |
+|---|---:|---:|---:|
+| FP32 | 0.0944 ms | 1.1646 ms | 7.5% |
+| UINT8 | 0.0260 ms | 1.1675 ms | 2.2% |
+
+It saves **5.4%** of frame time. YOLOv8s saves **10.8%** — twice as much, from a
+workload that looks smaller. r3d_18 ships 2.41 MB and spends 1.165 ms on it;
+YOLOv8s ships 4.92 MB and spends 0.979 ms.
+
+3D convolutions exist to do a great deal of compute per input byte, so they hide
+their own transport by construction. **Heavy architectures are poor candidates
+however large their input.**
+
+This is the [model-cost crossover](model-scaling.md) arriving from the input
+side: a fixed transport cost divided by a growing compute denominator.
+
 ## The three levers, together
 
 | Lever | Shrinks | By | Costs |
@@ -127,7 +207,9 @@ shipped a float tensor across PCIe, which is part of why
 
 ## Scope
 
-- Measured on **yolov8s at 640x640, FP16**, on one RTX 3090.
+- Measured on **yolov8s at 640x640, FP16**, on one RTX 3090; the model-selection
+  ranking extrapolates each model's measured H2D, assuming UINT8 removes 73% of it
+  (the figure measured directly on yolov8s at batch 1 and 8).
 - The B1 A/B is `perf_analyzer` at **concurrency 1**; it would not stabilise at
   higher concurrency in synchronous mode, so the sweep is one point, not a curve.
 - The accuracy run is the **numpy** preprocessing path — see the warning above.

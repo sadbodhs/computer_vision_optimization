@@ -1,0 +1,5 @@
+model	input	input_mb	input_dtype	h2d_ms	gpu_ms	h2d_share_pct	note
+r3d_18	1x3x16x112x112	2.41	fp32	0.0944	1.1646	7.5	3D CNN, Kinetics clip
+r3d_18	1x3x16x112x112	0.60	uint8	0.0260	1.1675	2.2	saves 5.4% of frame time
+yolov8s	1x3x640x640	4.92	fp32	0.1896	0.9792	16.2	2D detector, for comparison
+yolov8s	1x3x640x640	1.23	uint8	0.0509	0.9750	5.0	saves 10.8% - twice the 3D CNN

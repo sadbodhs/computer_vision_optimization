@@ -76,8 +76,14 @@ What *does* matter here, and is the real argument for A2:
 - **In-process control.** You own the CUDA stream, so you can order work against
   the rest of your robot's compute.
 
-> **If something moves because of the detection: A2. Do not batch. Measure p99,
-> not p50, and measure the whole loop.**
+**And ship 8-bit.** This is the one case where
+[UINT8 input](fewer-bytes.md) pays in full: with a single inference in flight
+there is nothing to hide the transfer behind, so the whole saving lands on the
+frame — **−16.3% latency**, for free, with no accuracy cost. Batched pipelines
+get nothing from it; closed loops get the most of anyone.
+
+> **If something moves because of the detection: A2. Do not batch. Ship UINT8
+> input. Measure p99, not p50, and measure the whole loop.**
 
 ### 2. Stream density — cameras per GPU is the budget
 
@@ -106,6 +112,12 @@ That is the one place the batching trade is unambiguously worth taking.
 Also relevant here: **INT8** is +32.8% throughput for −1.55 mAP points
 ([Precision](precision.md)) — a third more cameras per GPU, and it beats
 downgrading to a smaller model for the same speed.
+
+[UINT8 input](fewer-bytes.md) matters here too, for a different reason. It will
+not raise throughput on a compute-bound flow — but it cuts PCIe traffic ~3x, and
+at high stream counts the bus is a shared budget. D alone already moves ~12.9 GB/s
+of a ~24 GB/s link; a second pipeline on the same card is competing for what is
+left.
 
 > **If the answer goes into a database: B2 up to a few dozen streams, D beyond
 > that. Fix transport before you buy hardware.**
