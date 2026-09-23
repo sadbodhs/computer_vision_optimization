@@ -6,6 +6,7 @@ docs_dir: site_src
 
 theme:
   name: material
+  custom_dir: overrides
   features:
     - navigation.instant
     - navigation.tracking
@@ -29,6 +30,18 @@ theme:
         icon: material/weather-sunny
         name: Light mode
 
+extra:
+  social:
+    - icon: material/home
+      link: https://sadbodhs.github.io/
+      name: Sadbodh — the bench
+    - icon: material/eye-outline
+      link: https://sadbodhs.github.io/vlm_inference_optimization/
+      name: The VLM serving study
+    - icon: fontawesome/brands/github
+      link: https://github.com/sadbodhs/computer_vision_optimization
+      name: This repository
+
 markdown_extensions:
   - admonition
   - attr_list
@@ -43,6 +56,7 @@ plugins:
   - search
 
 nav:
+  - ← Sadbodh · the bench: https://sadbodhs.github.io/
   - Start here:
     - Introduction: index.md
     - Overview: overview.md
