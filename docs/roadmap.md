@@ -164,6 +164,23 @@ teach you to *find* an unknown bottleneck. Nsight Systems + NVTX ranges would.
 **System** — NVDEC session limits, multi-GPU scaling, GPU clocks/power limits and
 thermal throttling, CPU affinity/NUMA.
 
+**Multi-node orchestration (Ray)** — everything here stops at one GPU in one box.
+The layer that takes a pipeline past that is orchestration, and Ray is the obvious
+candidate. It belongs *above* Triton, not beside it: Ray Serve can front a Triton
+server, and Ray Data can feed one. That is why it is filed here and not added as
+a fourth serving contender. Racing Ray against Triton, TensorRT and DeepStream on
+a single 3090 would measure only Ray's per-request overhead with none of the
+scheduling it exists for — a result that is unfair to Ray and tells a reader
+nothing they would act on.
+
+The fair question is one this rig can partly answer: **Ray Data vs flow D on an
+offline corpus**. Take a fixed set of frames and measure the same engine at the same
+batch size, driven by Ray Data's batch inference versus D's async client plus
+Triton dynamic batching. Compare throughput, the GPU utilisation Ray Data sustains,
+and what it costs to express the job each way. The single-node result gives the
+overhead floor. The claim Ray actually makes, scaling across nodes, needs a second
+GPU box and stays open until there is one.
+
 **Deployment** — cold-start and engine load time, memory footprint per instance,
 TRT engine portability across versions (already brushed up against: 10.7 vs 10.3
 between the Triton and DeepStream containers).
