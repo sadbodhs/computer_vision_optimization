@@ -4,6 +4,7 @@
 # Output lands in the Triton model repo layout the configs expect:
 #   triton/models/<m>/1/model.plan          (max_batch_size 0, fixed [1,3,640,640])
 #   triton/models/<m>_dyn/1/model.plan      (max_batch_size 8, dynamic batching)
+#   triton/models/yolov8s_u8/1/model.plan   (UINT8 input, /255 folded into the graph)
 #
 # Engines are GPU/driver-specific and gitignored — this is how anyone rebuilds them.
 # Usage: scripts/export_models.sh
@@ -39,8 +40,20 @@ for m in yolov8n yolov8s yolo11n; do
     --minShapes=images:1x3x640x640 --optShapes=images:8x3x640x640 --maxShapes=images:8x3x640x640 \
     --saveEngine=${m}_dyn/1/model.plan 2>&1 | grep -E "Throughput|Engine" | tail -2
 
+  # 4) yolov8s only: UINT8-input engine -> models/yolov8s_u8/1/model.plan
+  #    (config: max_batch_size 0, images_u8 [1,3,640,640] uint8, output0 fp32).
+  #    --inputIOFormats=uint8:chw alone fails ("only activation types allowed as
+  #    input"), so fold_norm.py first splices Cast(uint8->float) + Div(255) onto the
+  #    fixed ONNX; TensorRT then folds the scale into the first conv. See docs/fewer-bytes.md.
+  if [ "$m" = yolov8s ]; then
+    python3 /work/scripts/fold_norm.py _exp_fixed/$m.onnx _exp_fixed/${m}_u8.onnx
+    mkdir -p ${m}_u8/1
+    $TRTEXEC --onnx=_exp_fixed/${m}_u8.onnx --fp16 --inputIOFormats=uint8:chw \
+      --saveEngine=${m}_u8/1/model.plan 2>&1 | grep -E "Throughput|Engine" | tail -2
+  fi
+
   rm -rf _exp_fixed _exp_dyn
 done
 echo "=== done ==="
-ls -R yolov8n yolov8s yolo11n yolov8n_dyn yolov8s_dyn yolo11n_dyn 2>/dev/null | grep -E "plan|:" || true
+ls -R yolov8n yolov8s yolo11n yolov8n_dyn yolov8s_dyn yolo11n_dyn yolov8s_u8 2>/dev/null | grep -E "plan|:" || true
 '
