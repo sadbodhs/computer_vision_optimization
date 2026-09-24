@@ -62,14 +62,13 @@ puts preprocessing at 0.15 ms against a 0.97 ms engine).
 
 ## 3. Fixed — bilinear costs 0.6% of frame time, buys 1.25% mAP
 
-All four implementations now interpolate bilinearly with center-aligned sampling
+All three implementations now interpolate bilinearly with center-aligned sampling
 (`src = (dst + 0.5) * scale - 0.5`, matching `cv2.INTER_LINEAR`):
 
 | File | What changed |
 |---|---|
 | `cpp/src/main_cuda.cu` | `nv12_letterbox_kernel` — bilinear luma, nearest chroma |
 | `cpp/src/grpc_client_cuda.cu` | same kernel |
-| `cpp/src/main_cuda.cpp` | same kernel (not built, kept consistent) |
 | `triton/client_v2.py` | `letterbox_nv12_np` — vectorised bilinear |
 
 Chroma stays nearest because NV12 already subsamples it 2×; the luma plane
