@@ -23,12 +23,33 @@ recipe: [`docker/README.md`](../docker/README.md).
     Export to a path outside the model repository. Engines with a
     `1/model.plan` and no `config.pbtxt` are fine — TensorRT plans auto-complete.
 
+!!! warning "Take the GPU lock before measuring anything"
+
+    Two workloads on one GPU corrupt each other's numbers, and not subtly: this
+    study measured sharing at **~24% error**, bigger than most of the effects it
+    reports. So GPU work is serialised, never "balanced".
+    [`scripts/gpu_lock.sh`](../scripts/gpu_lock.sh) is a `mkdir`-atomic lock at
+    `/home/suchi/sadbodh/.gpu-lock` (override with `GPU_LOCK`) with an `owner`
+    file recording who holds it, why, and since when.
+
+    ```bash
+    scripts/gpu_lock.sh status                        # holder + what is on the GPU
+    scripts/gpu_lock.sh run bench -- scripts/benchmark_v2.sh 10 3   # wait, run, release
+    scripts/gpu_lock.sh acquire bench "batch-8 A2 vs D"             # or hold it by hand
+    scripts/gpu_lock.sh release bench
+    ```
+
+    It is a convention, not enforcement: it only works if **every** GPU user on
+    the machine goes through it. `status` also lists the GPU's actual compute
+    processes, so a free lock over a busy GPU is visible. Engine builds count as
+    GPU work too — `trtexec` times kernels while it builds.
+
 
 ## From a clean clone
 
 ```bash
 docker/build.sh                              # build triton-bench:v3 + ds-build:latest
-scripts/export_models.sh                     # pt -> ONNX -> FP16 .plan (all 6 engines)
+scripts/export_models.sh                     # pt -> ONNX -> FP16 .plan (all 7 engines)
 docker run -d --name triton-server --gpus all --shm-size=1g --network host \
   -v "$PWD/triton/models:/models" -v "$PWD/videos:/work/videos" \
   triton-bench:v3 tritonserver --model-repository=/models
