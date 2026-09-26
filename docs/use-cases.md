@@ -70,9 +70,11 @@ What *does* matter here, and is the real argument for A2:
 - **No network in the loop.** B2's 1.28 ms is a median. A server introduces a
   tail — GC pauses, scheduler decisions, a noisy neighbour — and closed loops are
   judged on p99, not p50.
-- **No batching, ever.** Every batching result in this study
-  ([Batching](batching.md)) is a reason *not* to batch in a control loop. D's
-  74 ms wait is two and a half frames of the world moving.
+- **Don't batch the way D does.** D's 74 ms is what batching costs when the
+  client keeps eight frames in flight per stream — a queue the client builds
+  itself. A control loop has one frame in flight. Whether a short-window dynamic
+  batcher costs anything in *that* regime is [not yet measured](roadmap.md#b3-live-traffic-dynamic-batching);
+  until it is, batch-1 is the safe choice.
 - **In-process control.** You own the CUDA stream, so you can order work against
   the rest of your robot's compute.
 

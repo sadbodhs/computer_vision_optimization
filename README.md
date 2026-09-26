@@ -74,6 +74,28 @@ Naming used everywhere in this repo:
 | **E1** | **DeepStream, 1 stream** | `nvv4l2decoder` (NVMM) | `nvinfer` (1/255, AR, sym-pad) | none (GStreamer) | TensorRT via `nvinfer` | marcoslucianops YOLO parser |
 | **E2** | **DeepStream, N-stream batched** | same × N | `nvstreammux` batch | none (GStreamer) | TensorRT batch-N | same |
 
+### How each flow feeds the GPU
+
+The table above is about *plumbing*. This one is about *load*, and a Triton user
+needs it before reading any latency number, because it explains most of them:
+
+| ID | Requests in flight per stream | Server-side batching | Engine batch shape | Execution contexts |
+|----|---|---|---|---|
+| A1, A2 | 1 (in-process) | none | fixed 1 | 1 per stream (one thread each) |
+| B1, B2 | 1 (synchronous client) | **off** — `max_batch_size: 0` | fixed 1 | 2 Triton instances, shared |
+| C1, C2 | 1 per process (synchronous) | **off** | fixed 1 | 2 Triton instances, shared |
+| **D** | **8 (async client)** | **dynamic** — preferred `[4, 8]`, 5 ms window | dynamic 1–8 | 2 Triton instances, shared |
+| E1, E2 | GStreamer pipeline | E1 none · E2 `nvstreammux` batch-N | E1 fixed 1 · E2 up to N | `nvinfer` |
+
+Two consequences to hold onto when reading the tables:
+
+- **"Concurrency N" means N client streams, not N requests.** Frames actually in
+  flight equal N for every flow except D, where they are **8 × N**. At
+  "concurrency 1", D is holding eight frames and B2 is holding one.
+- **"Batch-8" is D's ceiling, not what it runs.** Triton forms batches of exactly
+  4.00 at 1–4 streams and reaches ~8 only from 8 streams
+  ([measured](docs/batching.md#what-batch-size-does-d-actually-form)).
+
 **Reference ceiling**: `trtexec` on the batch-1 engine = **0.97 ms/frame,
 1028 fps**; the batch-8 engine = **0.61 ms/frame** (1630 fps effective). Every
 number below is the story of what stands between your camera and that 0.97 ms.
@@ -82,14 +104,24 @@ number below is the story of what stands between your camera and that 0.97 ms.
 
 Capacity mode, YOLOv8s FP16. Full tables: [Results](docs/results.md).
 
+**Capacity mode** replays frames flat-out and closed-loop: each client sends its
+next request the moment a slot frees. It measures how much a pipeline can
+process — not how long a frame from a live camera would wait.
+
 | Flow | Best latency (p50) | Best throughput | In one line |
 |---|---|---|---|
 | **A2** C++ TRT full-CUDA | **1.23 ms** | 1219 fps | Lowest latency, in-process control, zero dependencies |
 | **B2** Triton + CUDA shm | 1.28 ms | 1131 fps | Triton without the tax — ≈A2 latency, plus server ops |
 | **C2** Triton + numpy + sys-shm | 1.69 ms | 1038 fps | Python within 0.4 ms of C++ |
-| **D** Triton async + batch-8 | 6.2–74 ms wait | **1665–1816 fps** | Highest throughput; latency is the price |
+| **D** Triton async + dynamic batching | 6.2–74 ms† | **1665–1816 fps** | Highest throughput; latency is the price |
 | **E1** DeepStream | 1.50 ms | 45 fps/stream (source-bound) | Zero custom code, integrated NVDEC→infer |
 | B1 raw gRPC · C1 torch | 3.27 / 6.4 ms | 496 / 225 fps | What "just use the server" costs if you feed it naively |
+
+† D's latency is end-to-end p50 with the client holding **8 frames in flight per
+stream**, so it is mostly those frames queued behind each other (Little's law:
+8 × streams ÷ throughput) — not batch-window wait, which is capped at 5 ms. A live
+camera has one frame in flight and would not see these numbers; that regime is
+[not yet measured](docs/roadmap.md#b3-live-traffic-dynamic-batching).
 
 **The headline conclusion**: fed properly — CUDA-shm zero-copy plus async clients
 keeping batches full — Triton **beats the hand-rolled C++ pipeline by ~50% on
@@ -103,8 +135,8 @@ is only as good as its client; its scheduler is the irreplaceable part.
 | Live camera, lowest latency, full control | **A2** — C++ TRT full-CUDA | **1.23 ms** | 809 fps | fastest per frame; zero dependencies |
 | Live multi-stream, want a server | **B2** — Triton + CUDA shm | 1.28 ms | 1131 fps | ≈A2 latency + Triton ops (reload, metrics) |
 | Python-only team | **C2** — Triton + numpy + sys-shm | 1.69 ms | 1038 fps | within 0.4 ms of C++ with pure-Python client |
-| Offline / max throughput, latency negotiable | **D** — Triton async, batch-8 | 6.2–74 ms latency (0.61 ms engine floor) | 1640–1665 fps | cheapest GPU service per frame (0.61 ms) |
-| Multi-model production serving | **D** — 3 models × async batch-8 | 29–59 ms wait | **1799–1816 fps** | Triton scheduler has no hand-rolled equivalent |
+| Offline / max throughput, latency negotiable | **D** — Triton async, dynamic batching | 6.2–74 ms† (0.61 ms engine floor) | 1640–1665 fps | cheapest GPU service per frame (0.61 ms) |
+| Multi-model production serving | **D** — 3 models × async, dynamic batching | 29–59 ms† | **1799–1816 fps** | Triton scheduler has no hand-rolled equivalent |
 | Edge product, NVIDIA-supported stack | **E** — DeepStream | 1.50 ms (1 stream) | 45 fps/stream (source-bound) | zero custom code; NVDEC→infer integrated |
 
 At 30 FPS live video (33.3 ms budget) *every* flow keeps up — the differences are

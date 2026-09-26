@@ -123,6 +123,27 @@ latency *worse*, which corrected an earlier claim that 5ms was the floor of D's
 and NVIDIA's Model Analyzer. Flow D's dynamic-batch engines also need
 per-batch-size graph capture (`graph_spec`), untested.
 
+### B3 — live-traffic dynamic batching
+
+**Designed, not yet run.** Every latency number for D comes from capacity mode: a
+closed-loop client holding 8 frames in flight per stream. That is the right way to
+measure throughput and the wrong way to measure what a live camera experiences,
+which has at most one frame in flight. That regime has never been measured.
+
+**B3** is the flow that measures it: B2's synchronous client and CUDA-shm
+transport, pointed at a dynamic-batching model with a short window — preferred
+`[2, 4, 8]`, `max_queue_delay` 500 µs (plus a 0 µs arm), 2 instances. Batching
+happens only when frames already arrive together; no frame waits to be batched.
+
+It needs a new **paced mode**: N virtual cameras at 30 fps with random or
+synchronised phase, open-loop, turnaround measured from each frame's *scheduled*
+arrival so a slow server cannot hide its own delay.
+
+Predictions, stated in advance: at ≤ 8 cameras B3 matches B2 within ~0.5 ms and
+beats D's configuration by ~4–5 ms; at 48 cameras (past B2's ~1,131 fps ceiling)
+B2's turnaround grows without bound while B3 stays flat. If both hold, the
+closed-loop advice in [use cases](use-cases.md) changes.
+
 ### DeepStream E2 in capacity mode - attempted, harness-bound
 
 Run, and the result is that the measurement does not measure what it needs to.

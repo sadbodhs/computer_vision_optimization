@@ -20,12 +20,13 @@ costs if you feed them naively.
 ## Capacity results
 
 **Reading the cells.** `↑` is throughput (higher better), `↓` is per-frame
-latency p50 (lower better). Flow D splits its latency in two because the two
-halves behave differently: **`wait`** is how long a frame sits in the server
-queue waiting for batch-mates, and **`svc`** is the GPU service time once the
-batch runs. Full conventions: [notation](methodology.md#notation).
+latency p50 (lower better). Flow D's cell differs: its `↓` is end-to-end latency
+with the client holding **8 frames in flight per stream**, so it is mostly those
+frames waiting behind each other (Little's law), *not* the batch window — Triton's
+own queue accounts for ~1.3 ms of D's 6.2 ms at one stream. The bracketed figure
+is the engine's batch-8 cost per frame, a floor rather than a measurement. Full conventions: [notation](methodology.md#notation).
 
-!!! warning "`svc 0.61` is a ceiling, not a measurement"
+!!! warning "The bracketed `0.61` is the engine's floor, not a measurement"
 
     The same `0.61` appears on every D row because it is the **`trtexec`
     batch-8 per-frame cost** — the engine's floor — not a per-concurrency
@@ -35,16 +36,20 @@ batch runs. Full conventions: [notation](methodology.md#notation).
     Measured in [batching](batching.md#what-batch-size-does-d-actually-form).
 
 
+**Streams** are client streams. Frames in flight equal the stream count for every
+flow except D, where they are **8 × streams** — so each row compares equal
+*streams*, not equal load. See [how each flow feeds the GPU](../README.md#how-each-flow-feeds-the-gpu).
+
 Two numbers per cell. **`fps↑` = throughput (higher is better) · `ms↓` = per-frame
 latency p50 (lower is better)**. Best value per row is **bold**.
 
-| Concurrency | A1 — C++ TRT, CPU path | A2 — C++ TRT, full-CUDA | B1 — Triton+C++ gRPC | B2 — Triton+C++ CUDA-shm | C1 — Triton+PyTorch | C2 — Triton+Py numpy+shm | D — Triton async, batch-8 |
+| Streams | A1 — C++ TRT, CPU path | A2 — C++ TRT, full-CUDA | B1 — Triton+C++ gRPC | B2 — Triton+C++ CUDA-shm | C1 — Triton+PyTorch | C2 — Triton+Py numpy+shm | D — Triton async, dynamic ≤8 |
 |---|---|---|---|---|---|---|---|
-| 1 | 456↑ · 1.32↓ | 809↑ · **1.23↓** | 222↑ · 3.27↓ | 654↑ · 1.28↓ | 144↑ · 6.4↓ | 469↑ · 1.69↓ | **1041↑** · wait 6.2↓svc 0.61 |
-| 2 | 793↑ · 1.50↓ | **1219↑ · 1.60↓** | 368↑ · 4.03↓ | 951↑ · 1.83↓ | 198↑ · 9.6↓ | 736↑ · 2.20↓ | **1136↑** · wait 11.1 svc 0.61 |
-| 4 | 956↑ · 3.31↓ | **1175↑ · 3.40↓** | 472↑ · 6.90↓ | **1092↑ · 4.02↓** | 218↑ · 10.8↓ | 986↑ · 3.15↓ | **1378↑** · wait 19.2 svc 0.61 |
-| 8 | 1055↑ · 6.43↓ | **1187↑ · 6.72↓** | 488↑ · 14.6↓ | **1131↑ · 6.60↓** | 222↑ · 12.0↓ | 1037↑ · 6.86↓ | **1640↑** · wait 36.6 svc 0.61 |
-| 16 | 1205↑ · 11.8↓ | 1160↑ · 13.8↓ | 496↑ · 30.4↓ | **1128↑ · 13.5↓** | 225↑ · 14.7↓ | 1038↑ · 14.5↓ | **1665↑** · wait 73.9 svc 0.61 |
+| 1 | 456↑ · 1.32↓ | 809↑ · **1.23↓** | 222↑ · 3.27↓ | 654↑ · 1.28↓ | 144↑ · 6.4↓ | 469↑ · 1.69↓ | **1041↑** · 6.2↓ (engine floor 0.61) |
+| 2 | 793↑ · 1.50↓ | **1219↑ · 1.60↓** | 368↑ · 4.03↓ | 951↑ · 1.83↓ | 198↑ · 9.6↓ | 736↑ · 2.20↓ | **1136↑** · 11.1↓ (engine floor 0.61) |
+| 4 | 956↑ · 3.31↓ | **1175↑ · 3.40↓** | 472↑ · 6.90↓ | **1092↑ · 4.02↓** | 218↑ · 10.8↓ | 986↑ · 3.15↓ | **1378↑** · 19.2↓ (engine floor 0.61) |
+| 8 | 1055↑ · 6.43↓ | **1187↑ · 6.72↓** | 488↑ · 14.6↓ | **1131↑ · 6.60↓** | 222↑ · 12.0↓ | 1037↑ · 6.86↓ | **1640↑** · 36.6↓ (engine floor 0.61) |
+| 16 | 1205↑ · 11.8↓ | 1160↑ · 13.8↓ | 496↑ · 30.4↓ | **1128↑ · 13.5↓** | 225↑ · 14.7↓ | 1038↑ · 14.5↓ | **1665↑** · 73.9↓ (engine floor 0.61) |
 
 **Row winners.** For throughput: D (1665) > A2 (1219, saturates ~1200 from conc=2)
 > B2 (1131) > C2 (1038) > B1 (496) > C1 (225). For latency: A2 (1.23 ms at
