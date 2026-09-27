@@ -61,7 +61,8 @@ time you answer, and how far it moved is your error.
 
 The trap is that people optimise the wrong term. Inference is one stage in a loop
 that also contains sensor exposure, readout, decode, your control logic and the
-actuator itself. **A2's 1.23 ms and B2's 1.28 ms differ by 0.05 ms** — against a
+actuator itself. **A2 beats B2 by 0.3–0.9 ms per frame** on a like-for-like clock
+([measured](live-batching.md#6-choosing-a2-b2-or-b3-at-each-load)) — against a
 camera that takes tens of milliseconds to expose and deliver a frame, that
 difference is invisible. Measure the whole loop before optimising this stage.
 

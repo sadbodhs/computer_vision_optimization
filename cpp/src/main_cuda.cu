@@ -24,6 +24,7 @@ extern "C" {
 #include <mutex>
 #include <string>
 #include <thread>
+#include <random>
 #include <vector>
 
 using namespace nvinfer1;
@@ -163,6 +164,11 @@ struct StageTimes {  // milliseconds, per-thread accumulation
 
 static StageTimes g_stages;
 
+// frames.bin, loaded ONCE in main() and shared read-only by every stream. A copy
+// per stream is 1.47 GB each: 16 streams used 23.5 GB of host RAM and 32 would be
+// OOM-killed (exit 137) - the same defect fixed in grpc_client_cuda.cu.
+static std::vector<char> g_frame_buf;
+
 struct StreamCtx {
   std::string url;
   ICudaEngine* engine;
@@ -176,6 +182,14 @@ struct StreamCtx {
   std::vector<double>* latencies;
   std::mutex* lat_mtx;
   bool use_graph = false;
+  // --mode paced: this stream is one open-loop virtual camera. Same semantics as
+  // B2's client (grpc_client_cuda.cu) so the two flows compare like-for-like.
+  double fps = 0;
+  std::string phase = "random";
+  unsigned seed = 1;
+  double warmup = 1.0;
+  std::chrono::steady_clock::time_point t_start{};
+  std::atomic<long>* late = nullptr;
 };
 
 // Reported in the JSON so a run can never be mislabelled: capture is allowed to
@@ -211,22 +225,48 @@ static void runStream(StreamCtx* ctx) {
   CUDA_CHECK(cudaMallocHost((void**)&h_dets, MAX_DETS * sizeof(GPUDet)));
   CUDA_CHECK(cudaMallocHost((void**)&h_count, sizeof(int)));
 
-  if (ctx->mode == "file") {
-    std::ifstream f(ctx->file_path, std::ios::binary);
-    if (!f.good()) { std::cerr << "cannot open " << ctx->file_path << std::endl; return; }
-    f.seekg(0, std::ios::end); size_t sz = f.tellg(); f.seekg(0, std::ios::beg);
-    size_t n_frames = sz / in_size;
-    std::vector<char> buf(sz);
-    f.read(buf.data(), sz);
+  if (ctx->mode == "file" || ctx->mode == "paced") {
+    const std::vector<char>& buf = g_frame_buf;
+    const size_t n_frames = buf.size() / in_size;
+    if (n_frames == 0) { std::cerr << "no frames in " << ctx->file_path << std::endl; return; }
     long fi = 0;
     bool use_graph = ctx->use_graph;
     bool graph_ready = false;
     cudaGraph_t graph = nullptr;
     cudaGraphExec_t graph_exec = nullptr;
-    auto t0 = std::chrono::steady_clock::now();
-    while (true) {
-      double el = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
-      if (el > ctx->duration) break;
+    // Paced mode drives the SAME loop body on a camera's schedule: frame k is due at
+    // t_start + offset + k/fps whether or not the previous one finished, and
+    // turnaround is measured from that due time, upload included - so a slow run
+    // cannot hide its delay by starting frames late (coordinated omission).
+    using clk = std::chrono::steady_clock;
+    const bool paced = ctx->mode == "paced";
+    const double period = paced ? 1.0 / ctx->fps : 0.0;
+    double offset = 0.0;
+    if (paced && ctx->phase == "random") {
+      // Seeded per camera: identical phases to the B2/B3 runs with the same seed.
+      std::mt19937 rng(ctx->seed * 1000003u + (unsigned)ctx->stream_id);
+      offset = std::uniform_real_distribution<double>(0.0, period)(rng);
+    }
+    if (paced) { fi = ctx->stream_id % (long)n_frames; std::this_thread::sleep_until(ctx->t_start); }
+    const auto hard_stop = ctx->t_start + std::chrono::duration_cast<clk::duration>(
+        std::chrono::duration<double>(ctx->duration + 5.0));
+    auto t0 = clk::now();
+    for (long k = 0;; ++k) {
+      clk::time_point due{};
+      double due_s = 0.0;
+      if (paced) {
+        due_s = offset + (double)k * period;
+        if (due_s >= ctx->duration) break;
+        due = ctx->t_start + std::chrono::duration_cast<clk::duration>(
+            std::chrono::duration<double>(due_s));
+        const auto now = clk::now();
+        if (now > hard_stop) break;
+        if (now < due) std::this_thread::sleep_until(due);
+        else if (now - due > std::chrono::milliseconds(1) && due_s >= ctx->warmup) ctx->late->fetch_add(1);
+      } else {
+        double el = std::chrono::duration<double>(clk::now() - t0).count();
+        if (el > ctx->duration) break;
+      }
       auto ts = std::chrono::steady_clock::now();
       StageTimes st;
       CUDA_CHECK(cudaMemcpyAsync(d_in, buf.data() + fi * in_size, in_size, cudaMemcpyHostToDevice, stream));
@@ -290,8 +330,11 @@ static void runStream(StreamCtx* ctx) {
       st.compact = 0;  // compact ran on GPU inside t1 window
       st.nms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t2).count();
       st.n = 1;
-      double lat = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - ts).count();
-      { std::lock_guard<std::mutex> lk(*ctx->lat_mtx); ctx->latencies->push_back(lat); }
+      double lat = std::chrono::duration<double, std::milli>(
+          std::chrono::steady_clock::now() - (paced ? due : ts)).count();
+      if (!paced || due_s >= ctx->warmup) {
+        std::lock_guard<std::mutex> lk(*ctx->lat_mtx); ctx->latencies->push_back(lat);
+      }
       { std::lock_guard<std::mutex> lk(g_stages.mtx); g_stages.add(st); }
       ctx->det_count->fetch_add(kept);
       ctx->frame_count->fetch_add(1);
@@ -406,6 +449,10 @@ int main(int argc, char** argv) {
   int streams = 1;
   double duration = 30.0;
   bool use_graph = false;
+  double cam_fps = 0;
+  std::string phase = "random";
+  unsigned seed = 1;
+  double warmup = 1.0;
   for (int i = 1; i < argc; ++i) {
     std::string a = argv[i];
     if (a == "--engine" && i + 1 < argc) engine_path = argv[++i];
@@ -415,9 +462,28 @@ int main(int argc, char** argv) {
     else if (a == "--mode" && i + 1 < argc) mode = argv[++i];
     else if (a == "--file" && i + 1 < argc) file_path = argv[++i];
     else if (a == "--cuda-graph") use_graph = true;
+    else if (a == "--fps" && i + 1 < argc) cam_fps = std::stod(argv[++i]);
+    else if (a == "--phase" && i + 1 < argc) phase = argv[++i];
+    else if (a == "--seed" && i + 1 < argc) seed = (unsigned)std::stoul(argv[++i]);
+    else if (a == "--warmup" && i + 1 < argc) warmup = std::stod(argv[++i]);
   }
+  if (mode == "paced" && cam_fps <= 0) { std::cerr << "--mode paced needs --fps > 0" << std::endl; return 2; }
+  if (phase != "random" && phase != "sync") { std::cerr << "--phase must be random|sync" << std::endl; return 2; }
   ICudaEngine* engine = loadEngine(engine_path);
   if (!engine) return 1;
+  if (mode == "file" || mode == "paced") {
+    std::ifstream f(file_path, std::ios::binary);
+    if (!f.good()) { std::cerr << "cannot open " << file_path << std::endl; return 2; }
+    f.seekg(0, std::ios::end); size_t sz = f.tellg(); f.seekg(0, std::ios::beg);
+    g_frame_buf.resize(sz);
+    f.read(g_frame_buf.data(), sz);
+  }
+  std::atomic<long> late{0};
+  // Shared start line, far enough ahead that every stream has built its execution
+  // context before its first frame is due.
+  const auto t_start = std::chrono::steady_clock::now() +
+      std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+          std::chrono::duration<double>(2.0 + 0.05 * streams));
   std::atomic<long> frames{0}, dets{0};
   std::atomic<bool> running{true};
   std::vector<double> latencies; std::mutex lat_mtx;
@@ -425,10 +491,17 @@ int main(int argc, char** argv) {
   std::vector<StreamCtx> ctxs(streams);
   for (int i = 0; i < streams; ++i) {
     ctxs[i] = {url, engine, i, &frames, &dets, &running, duration, mode, file_path, &latencies, &lat_mtx, use_graph};
+    ctxs[i].fps = cam_fps; ctxs[i].phase = phase; ctxs[i].seed = seed; ctxs[i].warmup = warmup;
+    ctxs[i].t_start = t_start; ctxs[i].late = &late;
     threads.emplace_back(runStream, &ctxs[i]);
   }
   for (auto& t : threads) t.join();
+  // Paced: an overloaded run drains its backlog past the window; divide by the time
+  // actually taken or delivered throughput is over-reported.
   double dt = duration;
+  if (mode == "paced")
+    dt = std::max(duration, std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - t_start).count());
   long n = frames.load();
   std::sort(latencies.begin(), latencies.end());
   auto pct = [&](double p) -> double {
@@ -440,6 +513,12 @@ int main(int argc, char** argv) {
             << ",\"frames\":" << n << ",\"detections\":" << dets.load() << ",\"fps\":" << (n / dt)
             << ",\"lat_ms_p50\":" << pct(0.50) << ",\"lat_ms_p95\":" << pct(0.95)
             << ",\"lat_ms_p99\":" << pct(0.99)
+            << ",\"lat_ms_max\":" << (latencies.empty() ? 0.0 : latencies.back())
+            << ",\"lat_ms_mean\":" << [&] { double s = 0; for (double v : latencies) s += v;
+                                            return latencies.empty() ? 0.0 : s / latencies.size(); }()
+            << ",\"fps_per_camera\":" << cam_fps << ",\"offered_fps\":" << cam_fps * streams
+            << ",\"phase\":\"" << (mode == "paced" ? phase : std::string()) << "\""
+            << ",\"late_frames\":" << late.load()
             << ",\"cuda_graph\":" << (g_graph_active.load() ? "true" : "false")
             << ",\"stages_ms\":{\"decode\":" << g_stages.decode / sn
             << ",\"preprocess\":" << g_stages.preprocess / sn

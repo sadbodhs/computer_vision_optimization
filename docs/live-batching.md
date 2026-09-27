@@ -27,6 +27,10 @@ run.
       — at 48 cameras B2's median frame is **2.1 seconds** late; every batching
       config stays at **9–13 ms**.
     - **The right batch window grows with load.** There is no single best value.
+    - **Against A2, on the same clock:** A2 is fastest for normal traffic up to its
+      capacity (~1,290 fps). In synchronised bursts of 8+ cameras batching wins,
+      because A2's per-camera contexts share the GPU and all finish late together.
+      [Selection chart](#6-choosing-a2-b2-or-b3-at-each-load).
 
 ---
 
@@ -152,6 +156,49 @@ independent second run of the 0 µs config, which it matches. At 1 camera, where
 it formed batches of exactly 1.00, it still validly measures the engine's own cost
 (+0.64 ms). No published result is affected — every model behind one is either
 `max_batch_size: 0` or has batching configured explicitly.
+
+## 6. Choosing: A2, B2 or B3 at each load
+
+A2 was run in the same paced mode — same cameras, same seeded phases, same clock
+(from each frame's due time, upload included) — in a second sweep
+([`a2_paced.sh`](../scripts/a2_paced.sh) →
+[`results/v3/a2_paced.tsv`](../results/v3/a2_paced.tsv)). To show the two sweeps
+compare, that sweep re-ran six B2 cells: five reproduce within **0.2–4.1%**, the
+sixth (a 32-camera burst, where B2 is at its edge) within **12%**. Gaps smaller than
+that in burst cells are treated as ties below.
+
+![Lowest per-frame turnaround at each load, circled](img/selection-paced.png)
+
+*Circled: the lowest turnaround at each load. Chart:
+[`plot_selection.py`](../scripts/plot_selection.py).*
+
+| Traffic | Cameras (load) | Lowest turnaround | If you need a server |
+|---|---|---|---|
+| Unsynchronised | 1–16 (≤ 480 fps) | **A2** — 1.48–1.63 ms p50, 0.3–0.9 ms ahead of B2 | **B2** (B3 · 0 µs +0.3–0.6 ms p99) |
+| Unsynchronised | 32 (960 fps) | **A2** — 2.07 ms p50, 4.27 p99; half of B2's 4.35 p50 | **B3 · 500 µs** — 7.06 ms p99 |
+| Unsynchronised | 48 (1,440 fps) | **D config** — 8.95 ms p50, 12.59 p99. A2 (827 ms) and B2 (2,124 ms) are past capacity | D config |
+| Synchronised | 1–4 | **A2** | B2 (1 camera) · B3 · 500 µs (4) |
+| Synchronised | 8–32 | **batching** — D config lowest p99 at every point; A2 falls behind (16 cameras: 14.03 ms p50 vs B2's 9.65) | D config |
+| Any | 56 (1,680 fps) | nothing keeps up — every config ≥ 84 ms p50. Add a GPU | — |
+
+**Why A2 loses in bursts.** A2 gives every camera its own execution context and
+CUDA stream, so a synchronised burst of 16 frames launches 16 inferences at once.
+The GPU interleaves them and they all finish late together — A2's p50 (14.03 ms) is
+nearly its p99 (14.54 ms). Triton runs at most two at a time (2 instances): the
+first frames finish early and the last late (B2: 9.65 p50, 15.39 p99). For
+identical jobs arriving together, first-come-first-served gives a better average
+than sharing — Triton's instance count is quietly acting as admission control.
+
+**Capacities under live traffic:** A2 delivers ~1,290 fps before its queue grows
+without bound, B2 ~1,130, and the batching configs ~1,650.
+
+!!! warning "Correction: the A2–B2 latency gap was mis-measured"
+
+    Capacity mode reports A2 at 1.23 ms and B2 at 1.28 ms — "≈ A2 latency". The two
+    clocks start in different places: **A2's before the frame's upload to the GPU,
+    B2's after it.** On the same clock (paced mode) A2 is **0.3–0.9 ms faster per
+    frame** — 1.48–1.63 ms against 1.91–2.50 ms at 1–16 cameras. The Triton tax is
+    real, just still small against a 33 ms frame.
 
 ## Predictions, stated in advance
 

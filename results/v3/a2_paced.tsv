@@ -1,0 +1,61 @@
+arm	model	repeat	phase	cameras	offered_fps	fps	p50_ms	p95_ms	p99_ms	max_ms	mean_ms	late_frames	frames	mean_batch	queue_us_per_req	foreign_gpu
+a2	yolov8s (in-process engine)	1	random	1	30	30.0	1.626	1.910	1.974	2.124	1.703	0	390	1.00	0	
+a2	yolov8s (in-process engine)	1	random	4	120	120.0	1.678	2.409	2.481	5.517	1.741	0	1560	1.00	0	
+a2	yolov8s (in-process engine)	1	random	8	240	240.0	1.677	2.425	2.613	3.246	1.808	0	3120	1.00	0	
+a2	yolov8s (in-process engine)	1	random	16	480	480.0	1.829	3.281	3.508	3.599	1.830	0	6240	1.00	0	
+a2	yolov8s (in-process engine)	1	random	32	960	959.8	2.070	4.346	4.551	10.334	2.387	0	12480	1.00	0	
+a2	yolov8s (in-process engine)	1	random	48	1440	1301.5	763.743	1352.850	1475.720	1596.680	764.278	17280	18720	1.00	0	
+a2	yolov8s (in-process engine)	1	random	56	1680	1300.8	2037.770	3631.700	3820.530	4042.420	2054.600	20160	21840	1.00	0	
+b2_anchor	yolov8s	1	random	1	30	30.0	2.448	3.124	3.304	3.417	2.511	0	390	1.00	0	
+b2_anchor	yolov8s	1	random	8	240	240.0	2.584	4.221	4.276	4.412	2.682	0	3120	1.00	0	
+b2_anchor	yolov8s	1	random	32	960	959.9	4.483	6.712	7.879	8.356	4.641	0	12480	1.00	0	
+a2	yolov8s (in-process engine)	1	sync	1	30	30.0	1.617	1.872	1.981	2.125	1.685	0	390	1.00	0	
+a2	yolov8s (in-process engine)	1	sync	4	120	120.0	3.797	4.088	4.160	4.227	3.841	0	1560	1.00	0	
+a2	yolov8s (in-process engine)	1	sync	8	240	240.0	7.301	7.650	7.741	9.277	7.333	0	3120	1.00	0	
+a2	yolov8s (in-process engine)	1	sync	16	480	480.0	13.908	14.150	14.293	18.147	13.842	0	6240	1.00	0	
+a2	yolov8s (in-process engine)	1	sync	32	960	959.8	26.486	27.950	28.232	36.187	26.479	0	12480	1.00	0	
+a2	yolov8s (in-process engine)	1	sync	48	1440	1295.0	806.217	1438.510	1579.960	1737.830	819.112	17280	18720	1.00	0	
+a2	yolov8s (in-process engine)	1	sync	56	1680	1295.6	2113.100	3709.750	3889.710	4057.000	2118.250	20160	21840	1.00	0	
+b2_anchor	yolov8s	1	sync	1	30	30.0	2.481	3.171	3.329	3.448	2.528	0	390	1.00	0	
+b2_anchor	yolov8s	1	sync	8	240	240.0	7.414	9.504	9.773	9.976	6.878	0	3120	1.00	0	
+b2_anchor	yolov8s	1	sync	32	960	960.0	18.679	29.767	30.087	30.479	18.015	0	12480	1.00	0	
+b2_anchor	yolov8s	2	random	1	30	30.0	2.509	3.261	3.454	3.575	2.572	0	390	1.00	0	
+b2_anchor	yolov8s	2	random	8	240	240.0	1.883	2.751	2.792	2.993	1.987	0	3120	1.00	0	
+b2_anchor	yolov8s	2	random	32	960	959.7	3.042	5.187	5.857	6.082	3.310	0	12480	1.00	0	
+a2	yolov8s (in-process engine)	2	random	1	30	30.0	1.638	1.934	1.978	2.131	1.719	0	390	1.00	0	
+a2	yolov8s (in-process engine)	2	random	4	120	120.0	1.584	1.881	1.956	1.997	1.631	0	1560	1.00	0	
+a2	yolov8s (in-process engine)	2	random	8	240	240.0	1.478	1.861	2.006	2.271	1.540	0	3120	1.00	0	
+a2	yolov8s (in-process engine)	2	random	16	480	479.9	1.519	2.894	3.401	3.475	1.701	0	6240	1.00	0	
+a2	yolov8s (in-process engine)	2	random	32	960	959.7	1.846	3.623	3.916	5.132	2.070	0	12480	1.00	0	
+a2	yolov8s (in-process engine)	2	random	48	1440	1290.8	827.179	1457.990	1567.410	1679.020	835.504	17280	18720	1.00	0	
+a2	yolov8s (in-process engine)	2	random	56	1680	1293.1	2116.990	3722.030	3909.440	4093.900	2113.820	20160	21840	1.00	0	
+b2_anchor	yolov8s	2	sync	1	30	30.0	2.482	3.135	3.347	3.509	2.540	0	390	1.00	0	
+b2_anchor	yolov8s	2	sync	8	240	240.0	7.407	9.555	9.799	10.001	6.967	0	3120	1.00	0	
+b2_anchor	yolov8s	2	sync	32	960	960.0	18.690	29.794	30.074	30.603	18.039	0	12480	1.00	0	
+a2	yolov8s (in-process engine)	2	sync	1	30	30.0	1.626	1.890	1.968	1.991	1.697	0	390	1.00	0	
+a2	yolov8s (in-process engine)	2	sync	4	120	120.0	3.802	4.090	4.163	4.196	3.844	0	1560	1.00	0	
+a2	yolov8s (in-process engine)	2	sync	8	240	240.0	7.299	7.654	7.741	8.193	7.333	0	3120	1.00	0	
+a2	yolov8s (in-process engine)	2	sync	16	480	480.0	14.031	14.255	14.535	14.802	13.988	0	6240	1.00	0	
+a2	yolov8s (in-process engine)	2	sync	32	960	959.7	26.560	28.017	28.280	36.182	26.568	0	12480	1.00	0	
+a2	yolov8s (in-process engine)	2	sync	48	1440	1289.9	857.048	1493.740	1646.150	1752.850	860.025	17280	18720	1.00	0	
+a2	yolov8s (in-process engine)	2	sync	56	1680	1293.0	2150.150	3741.260	3943.680	4167.630	2147.120	20160	21840	1.00	0	
+a2	yolov8s (in-process engine)	3	random	1	30	30.0	1.608	1.895	2.014	2.116	1.678	0	390	1.00	0	
+a2	yolov8s (in-process engine)	3	random	4	120	120.0	1.557	1.869	1.950	2.057	1.599	0	1560	1.00	0	
+a2	yolov8s (in-process engine)	3	random	8	240	240.0	1.477	2.066	2.120	2.230	1.635	0	3120	1.00	0	
+a2	yolov8s (in-process engine)	3	random	16	480	480.0	1.517	2.682	3.375	5.323	1.682	0	6240	1.00	0	
+a2	yolov8s (in-process engine)	3	random	32	960	959.5	2.556	3.995	4.272	11.465	2.551	0	12480	1.00	0	
+a2	yolov8s (in-process engine)	3	random	48	1440	1287.2	846.286	1505.010	1648.760	1883.910	854.939	17280	18720	1.00	0	
+a2	yolov8s (in-process engine)	3	random	56	1680	1291.8	2131.750	3737.940	3919.730	4074.620	2136.240	20160	21840	1.00	0	
+b2_anchor	yolov8s	3	random	1	30	30.0	2.511	3.243	3.398	3.428	2.585	0	390	1.00	0	
+b2_anchor	yolov8s	3	random	8	240	240.0	1.996	2.759	2.799	2.880	2.162	0	3120	1.00	0	
+b2_anchor	yolov8s	3	random	32	960	959.7	5.249	8.167	10.047	10.709	5.342	0	12480	1.00	0	
+a2	yolov8s (in-process engine)	3	sync	1	30	30.0	1.622	1.881	1.947	1.989	1.692	0	390	1.00	0	
+a2	yolov8s (in-process engine)	3	sync	4	120	120.0	3.807	4.092	4.190	4.243	3.840	0	1560	1.00	0	
+a2	yolov8s (in-process engine)	3	sync	8	240	240.0	7.288	7.653	7.719	7.851	7.316	0	3120	1.00	0	
+a2	yolov8s (in-process engine)	3	sync	16	480	480.0	14.032	14.262	14.575	14.721	13.984	0	6240	1.00	0	
+a2	yolov8s (in-process engine)	3	sync	32	960	959.7	26.568	28.089	28.399	35.718	26.592	0	12480	1.00	0	
+a2	yolov8s (in-process engine)	3	sync	48	1440	1287.6	850.196	1530.900	1646.470	1757.740	863.898	17280	18720	1.00	0	
+a2	yolov8s (in-process engine)	3	sync	56	1680	1294.4	2131.390	3719.530	3936.760	4112.110	2129.890	20160	21840	1.00	0	
+b2_anchor	yolov8s	3	sync	1	30	30.0	2.486	3.209	3.340	3.600	2.545	0	390	1.00	0	
+b2_anchor	yolov8s	3	sync	8	240	240.0	7.407	9.464	9.758	10.084	6.837	0	3120	1.00	0	
+b2_anchor	yolov8s	3	sync	32	960	960.0	18.679	29.775	30.068	30.341	18.008	0	12480	1.00	0	

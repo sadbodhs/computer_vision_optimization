@@ -113,7 +113,7 @@ process — not how long a frame from a live camera would wait.
 | Flow | Best latency (p50) | Best throughput | In one line |
 |---|---|---|---|
 | **A2** C++ TRT full-CUDA | **1.23 ms** | 1219 fps | Lowest latency, in-process control, zero dependencies |
-| **B2** Triton + CUDA shm | 1.28 ms | 1131 fps | Triton without the tax — ≈A2 latency, plus server ops |
+| **B2** Triton + CUDA shm | 1.28 ms‡ | 1131 fps | Triton without the tax — ≈A2 latency, plus server ops |
 | **C2** Triton + numpy + sys-shm | 1.69 ms | 1038 fps | Python within 0.4 ms of C++ |
 | **D** Triton async + dynamic batching | 6.2–74 ms† | **1665–1816 fps** | Highest throughput; latency is the price |
 | **E1** DeepStream | 1.50 ms | 45 fps/stream (source-bound) | Zero custom code, integrated NVDEC→infer |
@@ -126,6 +126,10 @@ camera has one frame in flight and would not see these numbers — under live
 traffic batching costs ~0.5 ms with a zero window and ~5.5 ms with D's 5 ms one
 ([measured](docs/live-batching.md)).
 
+‡ Not like-for-like: A2's clock starts before the frame's upload to the GPU, B2's
+after it. On the same clock, A2 is **0.3–0.9 ms faster per frame**
+([measured](docs/live-batching.md#6-choosing-a2-b2-or-b3-at-each-load)).
+
 **The headline conclusion**: fed properly — CUDA-shm zero-copy plus async clients
 keeping batches full — Triton **beats the hand-rolled C++ pipeline by ~50% on
 throughput**. The same server with a naive client loses by 8×. Triton's framework
@@ -136,7 +140,7 @@ is only as good as its client; its scheduler is the irreplaceable part.
 | Scenario | Pick | Latency (p50/frame) | Throughput | Why this pick |
 |---|---|---|---|---|
 | Live camera, lowest latency, full control | **A2** — C++ TRT full-CUDA | **1.23 ms** | 809 fps | fastest per frame; zero dependencies |
-| Live multi-stream, want a server | **B2** — Triton + CUDA shm | 1.28 ms | 1131 fps | ≈A2 latency + Triton ops (reload, metrics) |
+| Live multi-stream, want a server | **B2** — Triton + CUDA shm | 1.28 ms‡ | 1131 fps | ≈A2 latency + Triton ops (reload, metrics) |
 | Live cameras, bursts or load spikes possible | **B3** — B2's client + 0 µs dynamic batching | ~0.5 ms over B2 (paced mode) | bounded to ~1,650 fps | bounded tail in bursts; survives past B2's ~1,131 fps ([measured](docs/live-batching.md)) |
 | Python-only team | **C2** — Triton + numpy + sys-shm | 1.69 ms | 1038 fps | within 0.4 ms of C++ with pure-Python client |
 | Offline / max throughput, latency negotiable | **D** — Triton async, dynamic batching | 6.2–74 ms† (0.61 ms engine floor) | 1640–1665 fps | cheapest GPU service per frame (0.61 ms) |
