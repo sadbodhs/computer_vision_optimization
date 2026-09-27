@@ -1,6 +1,6 @@
 # Roadmap — what this study does *not* cover
 
-[← index](../README.md) · prev: [Reproduce](reproduce.md)
+[← index](../README.md) · prev: [On another GPU](other-gpus.md)
 
 This study measures one axis thoroughly: **the serving and transport layer**, at
 FP16, at 640×640, for YOLO detection on one GPU. Below is what it deliberately
@@ -211,4 +211,4 @@ committed under `results/` with a provenance note. See
 
 ---
 
-[← index](../README.md) · prev: [Reproduce](reproduce.md)
+[← index](../README.md) · prev: [On another GPU](other-gpus.md)

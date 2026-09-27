@@ -22,7 +22,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 REPO = sys.argv[1] if len(sys.argv) > 1 else "."
-R = os.path.join(REPO, "results", "v3")
+# RESULTS_DIR lets another GPU's data sit beside the 3090's (see docs/other-gpus.md)
+R = os.environ.get("RESULTS_DIR", os.path.join(REPO, "results", "v3"))
 OUT = os.path.join(REPO, "docs", "img", "selection-paced.png")
 
 ARMS = ["a2", "b2", "b3_0", "b3_500", "dnow"]           # 'nobatch' is a b3_0 replicate

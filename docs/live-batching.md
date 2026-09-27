@@ -172,14 +172,18 @@ that in burst cells are treated as ties below.
 *Circled: the lowest turnaround at each load. Chart:
 [`plot_selection.py`](../scripts/plot_selection.py).*
 
-| Traffic | Cameras (load) | Lowest turnaround | If you need a server |
-|---|---|---|---|
-| Unsynchronised | 1–16 (≤ 480 fps) | **A2** — 1.48–1.63 ms p50, 0.3–0.9 ms ahead of B2 | **B2** (B3 · 0 µs +0.3–0.6 ms p99) |
-| Unsynchronised | 32 (960 fps) | **A2** — 2.07 ms p50, 4.27 p99; half of B2's 4.35 p50 | **B3 · 500 µs** — 7.06 ms p99 |
-| Unsynchronised | 48 (1,440 fps) | **D config** — 8.95 ms p50, 12.59 p99. A2 (827 ms) and B2 (2,124 ms) are past capacity | D config |
-| Synchronised | 1–4 | **A2** | B2 (1 camera) · B3 · 500 µs (4) |
-| Synchronised | 8–32 | **batching** — D config lowest p99 at every point; A2 falls behind (16 cameras: 14.03 ms p50 vs B2's 9.65) | D config |
-| Any | 56 (1,680 fps) | nothing keeps up — every config ≥ 84 ms p50. Add a GPU | — |
+| Traffic | Cameras (load) | Lowest turnaround | GPU busy (3090) | If you need a server |
+|---|---|---|---|---|
+| Unsynchronised | 1–16 (≤ 480 fps) | **A2** — 1.48–1.63 ms p50, 0.3–0.9 ms ahead of B2 | 4–46% | **B2** (B3 · 0 µs +0.3–0.6 ms p99) |
+| Unsynchronised | 32 (960 fps) | **A2** — 2.07 ms p50, 4.27 p99; half of B2's 4.35 p50 | 77% | **B3 · 500 µs** — 7.06 ms p99 |
+| Unsynchronised | 48 (1,440 fps) | **D config** — 8.95 ms p50, 12.59 p99. A2 (827 ms) and B2 (2,124 ms) are past capacity | 100% | D config |
+| Synchronised | 1–4 | **A2** | 4–14% | B2 (1 camera) · B3 · 500 µs (4) |
+| Synchronised | 8–32 | **batching** — D config lowest p99 at every point; A2 falls behind (16 cameras: 14.03 ms p50 vs B2's 9.65) | 28–78% | D config |
+| Any | 56 (1,680 fps) | nothing keeps up — every config ≥ 84 ms p50. Add a GPU | not sampled (already 99–100% at 48) | — |
+
+*GPU busy: `nvidia-smi` utilisation of the winning config at that load (from §7).
+Synchronised rows use the same load's figure — average utilisation depends on frames
+per second, not on arrival pattern.*
 
 **Why A2 loses in bursts.** A2 gives every camera its own execution context and
 CUDA stream, so a synchronised burst of 16 frames launches 16 inferences at once.
@@ -199,6 +203,45 @@ without bound, B2 ~1,130, and the batching configs ~1,650.
     B2's after it.** On the same clock (paced mode) A2 is **0.3–0.9 ms faster per
     frame** — 1.48–1.63 ms against 1.91–2.50 ms at 1–16 cameras. The Triton tax is
     real, just still small against a 33 ms frame.
+
+## 7. How busy the GPU was
+
+Every config was re-run at each load while sampling `nvidia-smi` every 200 ms inside
+the measured window (unsynchronised cameras, one repeat;
+[`util_paced.sh`](../scripts/util_paced.sh) →
+[`results/v3/gpu_util_paced.tsv`](../results/v3/gpu_util_paced.tsv), figure
+[`plot_util.py`](../scripts/plot_util.py)). This is the part that carries over to a
+different GPU — see [on another GPU](other-gpus.md).
+
+![GPU utilisation, turnaround against utilisation, and SM clock](img/gpu-util-paced.png)
+
+| Cameras | A2 | B2 | B3 · 0 µs | B3 · 500 µs | D config | SM clock | Power |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 4.0% | 4.5% | 6.0% | 6.1% | 6.0% | 1,695 MHz | ~115 W |
+| 4 | 13.6% | 16.2% | 21.3% | 21.3% | 15.9% | 1,695 MHz | ~130 W |
+| 8 | 26.3% | 29.6% | 36.9% | 36.8% | 27.9% | 1,695 MHz | ~145 W |
+| 16 | 45.6% | 51.5% | 60.3% | 61.1% | 45.8% | ~1,940 MHz | ~240 W |
+| 32 | 77.2% | 89.5% | 94.1% | 90.7% | 78.3% | ~1,880–1,940 MHz | ~325–343 W |
+| 48 | 99.0% | 99.0% | 100% | 100% | 100% | ~1,760–1,880 MHz | **~348 W** |
+
+- **Utilisation grows roughly in proportion to load.** A2 costs the least GPU per
+  camera; B3 the most at low load, because the batch-8 engine runs single frames
+  inefficiently. D's config is as cheap as A2 at 16–32 cameras: its bigger batches
+  mean fewer, more efficient executions.
+- **One-frame-at-a-time pipelines stay flat until ~80%, then hit a wall.** A2 is
+  2.07 ms at 77%; B2 is already 4.46 ms at 90%, nearly double its low-load value.
+  **Keep A2 and B2 under ~80% `nvidia-smi` utilisation.**
+- **For batching configs, 100% is not the wall.** At 48 cameras they read 100% and
+  still turn frames around in 9–13 ms, because a busier GPU forms bigger batches.
+  `nvidia-smi` reports that *some* kernel was running, not that there was no capacity
+  left.
+- **The 3090's wall is partly a power wall.** The SM clock sits at 1,695 MHz up to 8
+  cameras, boosts to ~1,950 MHz at 16–32, and falls back to ~1,760–1,880 MHz at 48
+  cameras, where the card draws ~348 W against its 350 W limit.
+- **One camera is slower than four — but only on the Triton paths** (B2 2.47 vs
+  2.06 ms, B3 · 0 µs 3.04 vs 2.73), not in A2 (1.64 vs 1.70), and at the same
+  1,695 MHz clock either way. So it is not the GPU: it looks like a wake-up cost on the
+  gRPC and server side when requests are sparse.
 
 ## Predictions, stated in advance
 
