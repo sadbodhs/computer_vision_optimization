@@ -70,11 +70,12 @@ What *does* matter here, and is the real argument for A2:
 - **No network in the loop.** B2's 1.28 ms is a median. A server introduces a
   tail — GC pauses, scheduler decisions, a noisy neighbour — and closed loops are
   judged on p99, not p50.
-- **Don't batch the way D does.** D's 74 ms is what batching costs when the
-  client keeps eight frames in flight per stream — a queue the client builds
-  itself. A control loop has one frame in flight. Whether a short-window dynamic
-  batcher costs anything in *that* regime is [not yet measured](roadmap.md#b3-live-traffic-dynamic-batching);
-  until it is, batch-1 is the safe choice.
+- **Don't batch the way D does.** D's 74 ms is a queue its own client builds by
+  keeping eight frames in flight. Under live traffic — one frame per camera —
+  [measured](live-batching.md): D's 5 ms window costs every frame ~5.5 ms, while a
+  zero-window batcher (B3 · 0 µs) costs ~0.5 ms and cuts burst p99 by up to 24%.
+  At low load, no batching (B2) is still fastest by that half-millisecond; where
+  bursts or load spikes are possible, B3 · 0 µs is cheap insurance.
 - **In-process control.** You own the CUDA stream, so you can order work against
   the rest of your robot's compute.
 

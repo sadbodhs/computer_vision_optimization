@@ -123,26 +123,20 @@ latency *worse*, which corrected an earlier claim that 5ms was the floor of D's
 and NVIDIA's Model Analyzer. Flow D's dynamic-batch engines also need
 per-batch-size graph capture (`graph_spec`), untested.
 
-### B3 — live-traffic dynamic batching
+### B3 — live-traffic dynamic batching — measured
 
-**Designed, not yet run.** Every latency number for D comes from capacity mode: a
-closed-loop client holding 8 frames in flight per stream. That is the right way to
-measure throughput and the wrong way to measure what a live camera experiences,
-which has at most one frame in flight. That regime has never been measured.
+Done: [live traffic (B3)](live-batching.md). A new paced mode — open-loop virtual
+cameras, turnaround from each frame's due time — against B2, D's configuration and
+two short-window batchers. Below capacity, batching only adds latency: ~0.5 ms with
+a zero window (almost all of it the batch-8 engine), ~5.5 ms with D's 5 ms window.
+In a synchronised burst it cuts p99 13–24%. At 48 cameras, past B2's capacity, B2's
+median frame is 2.1 s late while every batching config stays at 9–13 ms. The best
+window grows with load, and Triton turns batching on by itself for any model with
+`max_batch_size > 0` and no scheduler named.
 
-**B3** is the flow that measures it: B2's synchronous client and CUDA-shm
-transport, pointed at a dynamic-batching model with a short window — preferred
-`[2, 4, 8]`, `max_queue_delay` 500 µs (plus a 0 µs arm), 2 instances. Batching
-happens only when frames already arrive together; no frame waits to be batched.
-
-It needs a new **paced mode**: N virtual cameras at 30 fps with random or
-synchronised phase, open-loop, turnaround measured from each frame's *scheduled*
-arrival so a slow server cannot hide its own delay.
-
-Predictions, stated in advance: at ≤ 8 cameras B3 matches B2 within ~0.5 ms and
-beats D's configuration by ~4–5 ms; at 48 cameras (past B2's ~1,131 fps ceiling)
-B2's turnaround grows without bound while B3 stays flat. If both hold, the
-closed-loop advice in [use cases](use-cases.md) changes.
+Still open from it: a batch-8 engine with a second, batch-1 optimisation profile,
+which could remove most of the ~0.6 ms engine cost batching pays at low load; and
+the per-stream `frames.bin` copy in the A2 and D clients (fixed only in B2's).
 
 ### DeepStream E2 in capacity mode - attempted, harness-bound
 

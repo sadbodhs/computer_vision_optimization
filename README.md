@@ -40,6 +40,7 @@ turned out to be wrong, and what it took to get a trustworthy one.
 | [Model cost](docs/model-scaling.md) | When does the plumbing stop mattering? | Non-engine cost is fixed at 0.256 ms; A2 crosses under 10% at a 2.3 ms engine, B1 not until 10.4 ms |
 | [Across architectures](docs/model-zoo.md) | What sets the plumbing cost? | Output bytes / 25 GB/s — and output shape is an architectural choice: DeepLabV3 pays 57% transport, SegFormer-B0 14%, at the same engine cost. Params predict engine time at r&sup2; 0.80 in bulk, but ResNet50 and YOLO11l share 25M and differ 5.8x |
 | [Batching](docs/batching.md) | Is dynamic batching free? | No — 37% cheaper GPU/frame, paid in 6–74 ms added latency (mostly in-flight depth, not queue) |
+| [Live traffic (B3)](docs/live-batching.md) | What does batching cost a live camera? | ~0.5 ms with a zero window, ~5.5 ms with D's 5 ms window; past B2's capacity it is 13 ms against 2 s |
 | [Triton tuning](docs/triton-tuning.md) | Were the Triton knobs right? | `count:2` validated (+30% over 1); graphs and instances are substitutes |
 | [CUDA graphs](docs/cuda-graphs.md) | Is the engine ceiling real? | No — ~0.13 ms of it is launch overhead; +11.8% inside A2, and its plateau rises 1167→1249 fps |
 | [In-graph NMS](docs/in-graph-nms.md) | Is the 2.82 MB output worth removing? | On raw gRPC yes — +33% despite a 19% slower engine; on zero-copy paths, no |
@@ -85,6 +86,7 @@ needs it before reading any latency number, because it explains most of them:
 | B1, B2 | 1 (synchronous client) | **off** — `max_batch_size: 0` | fixed 1 | 2 Triton instances, shared |
 | C1, C2 | 1 per process (synchronous) | **off** | fixed 1 | 2 Triton instances, shared |
 | **D** | **8 (async client)** | **dynamic** — preferred `[4, 8]`, 5 ms window | dynamic 1–8 | 2 Triton instances, shared |
+| **B3** | 1 per camera (synchronous, paced) | **dynamic** — 0 µs or 500 µs window | dynamic 1–8 | 2 Triton instances, shared |
 | E1, E2 | GStreamer pipeline | E1 none · E2 `nvstreammux` batch-N | E1 fixed 1 · E2 up to N | `nvinfer` |
 
 Two consequences to hold onto when reading the tables:
@@ -120,8 +122,9 @@ process — not how long a frame from a live camera would wait.
 † D's latency is end-to-end p50 with the client holding **8 frames in flight per
 stream**, so it is mostly those frames queued behind each other (Little's law:
 8 × streams ÷ throughput) — not batch-window wait, which is capped at 5 ms. A live
-camera has one frame in flight and would not see these numbers; that regime is
-[not yet measured](docs/roadmap.md#b3-live-traffic-dynamic-batching).
+camera has one frame in flight and would not see these numbers — under live
+traffic batching costs ~0.5 ms with a zero window and ~5.5 ms with D's 5 ms one
+([measured](docs/live-batching.md)).
 
 **The headline conclusion**: fed properly — CUDA-shm zero-copy plus async clients
 keeping batches full — Triton **beats the hand-rolled C++ pipeline by ~50% on
@@ -134,6 +137,7 @@ is only as good as its client; its scheduler is the irreplaceable part.
 |---|---|---|---|---|
 | Live camera, lowest latency, full control | **A2** — C++ TRT full-CUDA | **1.23 ms** | 809 fps | fastest per frame; zero dependencies |
 | Live multi-stream, want a server | **B2** — Triton + CUDA shm | 1.28 ms | 1131 fps | ≈A2 latency + Triton ops (reload, metrics) |
+| Live cameras, bursts or load spikes possible | **B3** — B2's client + 0 µs dynamic batching | ~0.5 ms over B2 (paced mode) | bounded to ~1,650 fps | bounded tail in bursts; survives past B2's ~1,131 fps ([measured](docs/live-batching.md)) |
 | Python-only team | **C2** — Triton + numpy + sys-shm | 1.69 ms | 1038 fps | within 0.4 ms of C++ with pure-Python client |
 | Offline / max throughput, latency negotiable | **D** — Triton async, dynamic batching | 6.2–74 ms† (0.61 ms engine floor) | 1640–1665 fps | cheapest GPU service per frame (0.61 ms) |
 | Multi-model production serving | **D** — 3 models × async, dynamic batching | 29–59 ms† | **1799–1816 fps** | Triton scheduler has no hand-rolled equivalent |

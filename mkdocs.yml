@@ -73,6 +73,7 @@ nav:
     - Across architectures: model-zoo.md
   - Making it faster:
     - Batching: batching.md
+    - Live traffic (B3): live-batching.md
     - Triton tuning: triton-tuning.md
     - CUDA graphs: cuda-graphs.md
     - In-graph NMS: in-graph-nms.md
