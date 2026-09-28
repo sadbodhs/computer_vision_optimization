@@ -143,6 +143,37 @@ The same server with a naive client still loses by 8×. Triton's framework is on
 good as its client; whether its multi-model scheduler beats a hand-rolled one is
 untested.
 
+### Live cameras rank the pipelines differently
+
+Capacity mode asks how much a pipeline can process. A live camera asks something
+else: how long does *its* frame wait, with one frame in flight and a new one every
+33 ms? Paced mode measures that — virtual 30 fps cameras, each frame timed from the
+moment it is due, upload included ([live traffic](docs/live-batching.md)).
+
+![Median time per frame against the number of live cameras for A2, B2, B3 and D's settings](docs/img/live-cameras-headline.png)
+
+| 30 fps cameras | A2 | B2 | B3 · 0 µs | D's settings (5 ms window) |
+|---|---|---|---|---|
+| 8 (240 fps) | **1.48** | 1.92 | 2.33 | 7.33 |
+| 32 (960 fps) | **2.07** | 4.35 | 6.15 | 5.60 |
+| 48 (1,440 fps) | 827 | 2,124 | 13.0 | **8.95** |
+
+*Median ms per frame, unsynchronised cameras, median of 3 seeded repeats.*
+
+- **Below capacity, one frame at a time wins** — and in-process wins by another
+  0.3–0.9 ms. Batching can only add waiting there: ~0.5 ms with no window, ~5.5 ms
+  with D's 5 ms one.
+- **Past a one-frame-at-a-time pipeline's capacity, its queue grows without
+  limit** — B2's median frame is 2 s late at 48 cameras — while every batching
+  config stays at 9–13 ms. Bigger batches free GPU time, and near capacity that
+  *is* latency.
+- **When cameras fire together**, batching bounds the tail (13–24% lower p99 in
+  synchronised bursts) and A2 falls behind.
+
+So the pipeline is chosen by the load you will run at, and a short batching window
+is cheap insurance if that load can spike. Per-load picks, bursts and p99:
+[choosing A2, B2 or B3](docs/live-batching.md#6-choosing-a2-b2-or-b3-at-each-load).
+
 ## Decision guide
 
 | Scenario | Pick | Latency (p50/frame) | Throughput | Why this pick |
@@ -168,8 +199,11 @@ in latency headroom, not capability.
 3. **The GPU is almost never the bottleneck at the edge.** The fight is over PCIe
    round trips, serialization, and interpreter locks.
 4. **Match preprocessing bit-for-bit before comparing pipelines.**
-5. **Dynamic batching requires async in-flight clients** — sync clients pay for
-   the window and never collect the benefit.
+5. **Dynamic batching needs requests that arrive together — not async clients**
+   *(corrected 2026-09-28)*. We first wrote that sync clients pay for the window
+   and never collect the benefit. True of one client; but many live cameras, each
+   synchronous with one frame in flight, still form batches once load is high —
+   13 ms per frame against 2 s at 48 cameras ([B3](docs/live-batching.md)).
 6. **Shared memory: pick by data location.** CPU → system shm; GPU → CUDA IPC.
 
 ## Reproduce

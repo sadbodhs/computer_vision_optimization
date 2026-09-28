@@ -75,6 +75,15 @@ now waits for seven others to show up. At high concurrency that wait reaches
 For offline video analytics that is the best trade available. For a live camera
 it is a bus that misses its stop.
 
+Except that most of that wait came from the benchmark itself: its client held eight
+frames in flight per stream, which no camera does. Measured the way a camera
+actually sends — one frame in flight, on its 33 ms clock — batching with no wait
+window costs about **0.5 ms**, and once the GPU nears capacity it is the only thing
+that keeps up: **13 ms** per frame against **2 seconds** for the same server taking
+one frame at a time ([live traffic](live-batching.md)). The trade is real, but its
+size depends on how you measure it, and which pipeline is fastest changes with the
+load.
+
 So "fastest" is not a well-formed question. **Fastest at what?**
 
 ## The frame budget
@@ -97,6 +106,8 @@ can be named:
 - the same work through a server
 - the same again with the transport fixed
 - the server used properly, with batching and async clients
+- the same server under **live camera traffic**, one frame in flight per camera
+  (flow B3, [paced mode](live-batching.md))
 - NVIDIA's integrated stack for comparison
 
 Plus the parts people usually skip: what it costs in **accuracy**, what happens
@@ -108,7 +119,8 @@ which are paid for somewhere else.
 - **If you just want an answer**, the [decision guide](../README.md#decision-guide)
   maps common situations to a pipeline.
 - **If you are choosing a stack**, [Results](results.md) has the tables and the
-  latency-vs-throughput picture.
+  latency-vs-throughput picture; for live cameras, [live traffic](live-batching.md#6-choosing-a2-b2-or-b3-at-each-load)
+  picks a pipeline for each load.
 - **If you are debugging something slow**, [Stage decomposition](stage-decomposition.md)
   shows where per-frame time actually goes, and [Transport](transport.md) covers
   the single biggest avoidable cost.
