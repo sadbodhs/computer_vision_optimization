@@ -135,8 +135,10 @@ window grows with load, and Triton turns batching on by itself for any model wit
 `max_batch_size > 0` and no scheduler named.
 
 Still open from it: a batch-8 engine with a second, batch-1 optimisation profile,
-which could remove most of the ~0.6 ms engine cost batching pays at low load; and
-the per-stream `frames.bin` copy in the A2 and D clients (fixed only in B2's).
+which could remove most of the ~0.6 ms engine cost batching pays at low load. (The
+per-stream `frames.bin` copy is now fixed in all three clients, and the Triton
+clients' CUDA shared-memory leak is fixed and re-checked — see
+[live traffic](live-batching.md#re-checked-after-a-client-leak).)
 
 ### DeepStream E2 in capacity mode - attempted, harness-bound
 

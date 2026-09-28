@@ -181,6 +181,11 @@ that in burst cells are treated as ties below.
 | Synchronised | 8–32 | **batching** — D config lowest p99 at every point; A2 falls behind (16 cameras: 14.03 ms p50 vs B2's 9.65) | 28–78% | D config |
 | Any | 56 (1,680 fps) | nothing keeps up — every config ≥ 84 ms p50. Add a GPU | not sampled (already 99–100% at 48) | — |
 
+*At 48 synchronised cameras the chart's ring is a tie, not a winner: B3 · 0 µs and
+D config were 0.2 ms apart (23.14 vs 23.35 ms p50) and swapped order in the
+[re-check](#re-checked-after-a-client-leak) (24.82 vs 23.36). D config has the lower
+p99 in both.*
+
 *GPU busy: `nvidia-smi` utilisation of the winning config at that load (from §7).
 Synchronised rows use the same load's figure — average utilisation depends on frames
 per second, not on arrival pattern.*
@@ -275,7 +280,7 @@ possible.
 - **Every stream loaded its own copy of `frames.bin` (1.47 GB).** Published
   16-stream capacity runs were quietly using 23.5 GB of host RAM; at 32 streams the
   kernel killed the client before it printed anything (exit 137). The B2 client now
-  shares one copy. **The A2 and D clients still have the same pattern.**
+  shares one copy, and so do A2's (`ad541a7`) and D's (`97d9b3c`).
 - **The sweep's signal handler restored state and then kept running** — unlocked,
   with its backup deleted. The handler now exits, restores from git, and was
   tested on exactly that failure.
@@ -283,6 +288,42 @@ possible.
   nearest-neighbour resize the [accuracy](accuracy.md) work replaced. Paced mode
   never runs that kernel, so no result here is affected, and the rebuilt binary is
   current.
+
+## Re-checked after a client leak
+
+A fourth defect was found afterwards, in a sibling study that reused this client:
+**B2/B3's client (`trt_grpc_cuda`) and D's (`trt_grpc_async`) registered their CUDA
+shared-memory regions with Triton and never unregistered them.** Triton kept each
+run's GPU buffers mapped after the client exited — measured: 2 regions and +10 MiB
+of server GPU memory per camera per run. Every sweep on this page ran with it. The
+sweeps restart Triton whenever the batching config changes, so the leak peaked at a
+few GB of held memory within one server lifetime, never compute, and no drift shows
+across the published repeats. That was an inference, so it was measured.
+
+Both clients now unregister their regions on every exit path, and the sweeps clear
+leftovers before each run ([`shm_clear.sh`](../scripts/shm_clear.sh)). A slice of
+this page was then re-run with the fixed clients — B2, B3 · 0 µs and D config at 8,
+32 and 48 cameras, both phases, the same seeds, plus A2 as a control that never used
+Triton — with its predictions committed first
+([`leakfix_check.sh`](../scripts/leakfix_check.sh)):
+
+| Prediction | Result |
+|---|---|
+| P1 — no region left after any run; Triton's memory flat | **held** — 0 leftovers; 2,218 MiB before, between and after |
+| P2 — every Triton cell below capacity within ±10% (the cross-sweep anchor spread) | **held** — 23 cells, largest move 8.5%, most under 1%; overloaded cells stayed overloaded |
+| P3 — the A2 control within ±10% | **held** — within 4.6% |
+| P4 — the same fastest pipeline at every load | **failed on one cell** — 48 synchronised cameras, a 0.2 ms tie that swapped order (see [§6](#6-choosing-a2-b2-or-b3-at-each-load)) |
+
+**No published number on this page moves.** The utilisation figures in §7 were not
+re-run: `nvidia-smi` utilisation is GPU busy time, which held memory does not change.
+
+A first attempt at the re-check was stopped: an unrelated CPU-only job (load ~12)
+was running on the host, which the GPU lock cannot see, and B2 read 23–29% slow on
+identical seeds. Its rows are kept, labelled, and excluded; the script now refuses
+to start on a busy host. Paced timings depend on the host CPU as much as the GPU.
+
+Data: `results/v3/leakfix_b3_slice.tsv`, `leakfix_a2_slice.tsv`; comparison
+[`leakfix_compare.py`](../scripts/leakfix_compare.py).
 
 ## Scope
 
