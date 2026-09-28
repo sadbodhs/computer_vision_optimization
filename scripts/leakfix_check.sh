@@ -43,6 +43,18 @@ B3OUT=$ROOT/results/v3/leakfix_b3_slice.tsv
 A2OUT=$ROOT/results/v3/leakfix_a2_slice.tsv
 CAMS_SLICE="8 32 48"
 
+# Paced timings depend on the host CPU as much as the GPU, and a CPU-only job
+# never takes the GPU lock. The first attempt ran beside a 7-core job
+# (load ~12) and was stopped: B2 read 23-29% slow on the same seeds.
+MAX_LOAD=${MAX_LOAD:-3}
+load=$(cut -d" " -f1 /proc/loadavg)
+if awk -v l="$load" -v m="$MAX_LOAD" "BEGIN{exit !(l>m)}"; then
+  echo "refusing: host load average $load > $MAX_LOAD - paced timings would be distorted" >&2
+  ps -eo pcpu,etime,args --sort=-pcpu | head -4 >&2
+  bash "$LOCK" release bench >/dev/null 2>&1
+  exit 1
+fi
+
 server_mib() {
   local p; p=$(docker top "$C" -eo pid,comm 2>/dev/null | awk '$2=="tritonserver"{print $1; exit}')
   nvidia-smi --query-compute-apps=pid,used_memory --format=csv,noheader,nounits | awk -F', ' -v p="$p" '$1==p{print $2}'
