@@ -25,6 +25,13 @@
 #   P4  So at 1080p the decoder, not the detector, caps a single GPU: A2 alone
 #       processes ~1200 fps of yolov8s at 640, more than NVDEC can feed at 1080p.
 #
+# DECODER PATH. The first attempt used ffmpeg's generic `-hwaccel cuda`. In this
+# container that path fails to create a decoder (cuvidCreateDecoder:
+# CUDA_ERROR_INVALID_VALUE) and ffmpeg silently falls back to CPU decoding, still
+# exiting 0: decoder utilisation stayed at 0% while "decoding" 12,800 fps. The
+# harness now forces the CUVID hardware decoder (-c:v h264_cuvid, frames kept on
+# the GPU), which works (100% decoder utilisation, no errors), and marks any run
+# whose decoder utilisation never passes 50% as invalid rather than recording it.
 # Output: results/v3/nvdec_capacity.tsv. Caller holds the lock; needs a quiet CPU.
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -33,14 +40,15 @@ C=triton-server
 LOOPS=40
 FRAMES_PER_SESSION=$((300 * (LOOPS + 1)))
 
-# the 1080p source, made once on NVENC (not the CPU)
-if ! docker exec $C test -f /work/videos/real_1080p.mp4; then
-  docker exec $C ffmpeg -hide_banner -loglevel error -y -hwaccel cuda -hwaccel_output_format cuda \
-    -i /work/videos/real.mp4 -vf scale_cuda=1920:1080 -c:v h264_nvenc -b:v 8M -g 30 \
-    /work/videos/real_1080p.mp4
+# the 1080p source, made once: scaled on the CPU (this ffmpeg build has no
+# scale_cuda filter), encoded on NVENC. A 0-byte file from a failed attempt is
+# replaced, not reused.
+if ! docker exec $C test -s /work/videos/real_1080p.mp4; then
+  docker exec $C ffmpeg -hide_banner -loglevel error -y -i /work/videos/real.mp4 \
+    -vf scale=1920:1080 -c:v h264_nvenc -b:v 8M -g 30 /work/videos/real_1080p.mp4
 fi
 
-[ -f "$OUT" ] || printf "source\tsessions\trep\twall_s\tagg_fps\tcameras_30fps\tfailed\tdec_util_max\n" > "$OUT"
+[ -f "$OUT" ] || printf "source\tsessions\trep\twall_s\tagg_fps\tcameras_30fps\tfailed\tdec_util_max\tvalid\n" > "$OUT"
 for REP in 1 2 3; do
   ORDER=$(for s in real.mp4 real_1080p.mp4; do for n in 1 2 4 8 16 32; do echo "$s:$n"; done; done |
           python3 -c "import random,sys; l=sys.stdin.read().split(); random.Random($REP).shuffle(l); print(' '.join(l))")
@@ -54,7 +62,7 @@ for REP in 1 2 3; do
       fail=0
       for i in \$(seq 1 $n); do
         ffmpeg -hide_banner -loglevel error -nostats -hwaccel cuda -hwaccel_output_format cuda \
-          -stream_loop $LOOPS -i /work/videos/$src -f null - &
+          -c:v h264_cuvid -stream_loop $LOOPS -i /work/videos/$src -f null - &
       done
       for p in \$(jobs -p); do wait \$p || fail=\$((fail+1)); done
       echo \$fail")
@@ -65,7 +73,9 @@ for REP in 1 2 3; do
     python3 -c "
 w=float('$wall'); n=int('$n'); f=int('$failed')
 agg=(n-f)*$FRAMES_PER_SESSION/w
-print('\t'.join(['$src', str(n), '$REP', '%.2f'%w, '%.0f'%agg, '%.1f'%(agg/30), str(f), '${umax:-}']))" >> "$OUT"
+u=int('${umax:-0}' or 0)
+print('\t'.join(['$src', str(n), '$REP', '%.2f'%w, '%.0f'%agg, '%.1f'%(agg/30), str(f), str(u),
+                 'yes' if (u > 50 and f == 0) else 'NO']))" >> "$OUT"
     tail -1 "$OUT"
     sleep 3
   done
