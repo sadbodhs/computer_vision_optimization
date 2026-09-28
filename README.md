@@ -114,7 +114,7 @@ process — not how long a frame from a live camera would wait.
 
 | Flow | Best latency (p50) | Best throughput | In one line |
 |---|---|---|---|
-| **A2** C++ TRT full-CUDA | **1.23 ms** | 1219 fps | Lowest latency, in-process control, zero dependencies |
+| **A2** C++ TRT full-CUDA | **1.23 ms** | 1219 fps; **1622 fps at batch 8** | Lowest latency, in-process control, zero dependencies |
 | **B2** Triton + CUDA shm | 1.28 ms‡ | 1131 fps | Triton without the tax — ≈A2 latency, plus server ops |
 | **C2** Triton + numpy + sys-shm | 1.69 ms | 1038 fps | Python within 0.4 ms of C++ |
 | **D** Triton async + dynamic batching | 6.2–74 ms† | **1665–1816 fps** | Highest throughput; latency is the price |
@@ -132,10 +132,16 @@ traffic batching costs ~0.5 ms with a zero window and ~5.5 ms with D's 5 ms one
 after it. On the same clock, A2 is **0.3–0.9 ms faster per frame**
 ([measured](docs/live-batching.md#6-choosing-a2-b2-or-b3-at-each-load)).
 
-**The headline conclusion**: fed properly — CUDA-shm zero-copy plus async clients
-keeping batches full — Triton **beats the hand-rolled C++ pipeline by ~50% on
-throughput**. The same server with a naive client loses by 8×. Triton's framework
-is only as good as its client; its scheduler is the irreplaceable part.
+**The headline conclusion** *(corrected 2026-09-28)*: fed properly (CUDA-shm
+zero-copy plus async clients keeping batches full), Triton reaches the study's
+highest single-model throughput, **and a batched in-process C++ pipeline ties it**:
+1,622 vs 1,624 fps, at 10 ms p50 against D's 37 ms. The "~50% over hand-rolled C++"
+first published here compared D at batch 8, and on three models, with C++ at batch 1
+on one; the lead was the batch size
+([correction](docs/batching.md#correction-the-throughput-lead-is-batching-not-triton)).
+The same server with a naive client still loses by 8×. Triton's framework is only as
+good as its client; whether its multi-model scheduler beats a hand-rolled one is
+untested.
 
 ## Decision guide
 
@@ -145,8 +151,8 @@ is only as good as its client; its scheduler is the irreplaceable part.
 | Live multi-stream, want a server | **B2** — Triton + CUDA shm | 1.28 ms‡ | 1131 fps | ≈A2 latency + Triton ops (reload, metrics) |
 | Live cameras, bursts or load spikes possible | **B3** — B2's client + 0 µs dynamic batching | ~0.5 ms over B2 (paced mode) | bounded to ~1,650 fps | bounded tail in bursts; survives past B2's ~1,131 fps ([measured](docs/live-batching.md)) |
 | Python-only team | **C2** — Triton + numpy + sys-shm | 1.69 ms | 1038 fps | within 0.4 ms of C++ with pure-Python client |
-| Offline / max throughput, latency negotiable | **D** — Triton async, dynamic batching | 6.2–74 ms† (0.61 ms engine floor) | 1640–1665 fps | cheapest GPU service per frame (0.61 ms) |
-| Multi-model production serving | **D** — 3 models × async, dynamic batching | 29–59 ms† | **1799–1816 fps** | Triton scheduler has no hand-rolled equivalent |
+| Offline / max throughput, one model | **A2 at batch 8** or **D** (a tie) | A2: 10 ms · D: 37 ms† | ~1,620 fps both | same batch-8 engine; A2 in-process with a quarter of D's latency, D if you want a server ([measured](docs/batching.md#correction-the-throughput-lead-is-batching-not-triton)) |
+| Multi-model production serving | **D** — 3 models × async, dynamic batching | 29–59 ms† | **1799–1816 fps** | Triton's scheduler; no batched hand-rolled equivalent was built to compare |
 | Edge product, NVIDIA-supported stack | **E** — DeepStream | 1.50 ms (1 stream) | 45 fps/stream (source-bound) | zero custom code; NVDEC→infer integrated |
 
 At 30 FPS live video (33.3 ms budget) *every* flow keeps up — the differences are

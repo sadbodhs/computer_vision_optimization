@@ -51,7 +51,10 @@ latency p50 (lower is better)**. Best value per row is **bold**.
 | 8 | 1055↑ · 6.43↓ | **1187↑ · 6.72↓** | 488↑ · 14.6↓ | **1131↑ · 6.60↓** | 222↑ · 12.0↓ | 1037↑ · 6.86↓ | **1640↑** · 36.6↓ (engine floor 0.61) |
 | 16 | 1205↑ · 11.8↓ | 1160↑ · 13.8↓ | 496↑ · 30.4↓ | **1128↑ · 13.5↓** | 225↑ · 14.7↓ | 1038↑ · 14.5↓ | **1665↑** · 73.9↓ (engine floor 0.61) |
 
-**Row winners.** For throughput: D (1665) > A2 (1219, saturates ~1200 from conc=2)
+**Row winners.** *(All flows here at batch 1 except D. Given the same batch-8 engine,
+A2 ties D at ~1,620 fps with a quarter of its latency:
+[correction](batching.md#correction-the-throughput-lead-is-batching-not-triton).)*
+For throughput: D (1665) > A2 (1219, saturates ~1200 from conc=2)
 > B2 (1131) > C2 (1038) > B1 (496) > C1 (225). For latency: A2 (1.23 ms at
 conc=1, 1.60 at conc=2) < B2 < C2 < D's wait (6.2–73.9).
 

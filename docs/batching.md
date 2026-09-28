@@ -138,8 +138,10 @@ and every request paid the window's latency while riding alone.
 
 The fix: an **async client with eight requests in flight** per stream. Requests
 co-arrive, batches fill, and the same server delivers **1665 fps — the highest
-number in the entire study, and the only configuration that beats in-process
-C++.**
+number in the entire study**. It was first written up as "the only configuration
+that beats in-process C++"; that compared it with C++ at batch 1, and C++ given the
+same batch-8 engine ties it
+([correction below](#correction-the-throughput-lead-is-batching-not-triton)).
 
 ## The bill, in the latency column
 
@@ -167,16 +169,44 @@ production scenario, where its scheduler has no hand-rolled equivalent:
 
 | Scenario | Total fps | Latency p50 | vs hand-rolled best |
 |---|---|---|---|
-| D: 1 model (yolov8s), conc=16 | 1665 | 73.9 ms wait | +38% vs A2 (1205) |
+| D: 1 model (yolov8s), conc=16 | 1665 | 73.9 ms wait | +38% vs A2 at batch 1 (1205); **ties A2 at batch 8** ([correction](#correction-the-throughput-lead-is-batching-not-triton)) |
 | **D: 3 models × 6 streams each** | **1799** | 29.4 ms | +49% vs A2 |
 | **D: 3 models × 6 streams (conc=18)** | **1816** | 58.6 ms | +51% vs A2 |
 | D: yolov8n alone, conc=8 | 1988 | 24.1 ms | engine cap 2960 effective |
 
+### Correction: the throughput lead is batching, not Triton
+
+*Added 2026-09-28.* Every "+38%" and "~50%" in this section compared D, running a
+**batch-8** engine, with A2 running a **batch-1** engine: A2's client was hardcoded
+to one frame per pass. Given the same dynamic-batch engine and eight frames per pass
+(`trt_pipeline_cuda --batch 8`, capacity mode), A2 was measured against D in one
+session, 3 interleaved repeats
+([`batch8_a2_vs_d.sh`](../scripts/batch8_a2_vs_d.sh), predictions committed first):
+
+| Capacity mode, yolov8s | Best throughput | Latency p50 there |
+|---|---:|---:|
+| A2, batch 1 (the published A2) | 1,192 fps (4 streams) | 3.4 ms |
+| **A2, batch 8** | **1,622 fps** (2 streams) | **10.0 ms** |
+| D, Triton async + dynamic batching | 1,624 fps (8 in flight) | 36.9 ms |
+
+**Batch-8 A2 ties D on throughput (within 0.1%) at about a quarter of D's
+latency.** The single-model lead was the batch size, not the server; and in-process,
+the eight frames of a batch do not queue behind a client's in-flight window. A2 at
+batch 1 reproduced its published numbers (808 fps single-stream, 1,192 at the
+plateau). D did not quite: 1,624 fps at 8 in flight against the published 1,640,
+and 1,536 at 16 against the published 1,665 (−7.7%).
+
+The multi-model rows above are **not** corrected, because they were never compared
+like-for-like: they serve three models (two lighter than yolov8s) against A2 running
+yolov8s alone at batch 1, and no batched multi-model C++ pipeline was built. Whether
+Triton's scheduler beats a hand-rolled one there is untested.
+
 ### This is the answer to "shouldn't Triton win?"
 
-Yes — when fed properly. With CUDA shm zero-copy and async clients keeping batches
-full, Triton **beats the hand-rolled C++ pipeline by ~50% on throughput**. The
-same server with naive clients (C1: 225 fps) loses by 8×.
+On one model, no: fed properly it ties a batched in-process pipeline on throughput
+and costs more latency ([correction above](#correction-the-throughput-lead-is-batching-not-triton)).
+The ~50% first reported here compared it with C++ at batch 1. The same server with
+naive clients (C1: 225 fps) still loses by 8×.
 
 **Triton's framework is only as good as its client; its scheduler is the
 irreplaceable part.** You can hand-roll zero-copy and NVDEC in an afternoon. You
