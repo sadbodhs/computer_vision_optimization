@@ -1,6 +1,6 @@
 # Contention — N pipelines, one GPU
 
-[← index](../README.md) · prev: [In-graph NMS](in-graph-nms.md) · next: [Accuracy](accuracy.md)
+[← index](../README.md) · prev: [In-graph NMS](in-graph-nms.md) · next: [Manufacturing inspection](inspection.md)
 
 What happens to *your* latency when someone else is using the GPU too.
 
@@ -133,4 +133,4 @@ varied.**
 
 ---
 
-[← index](../README.md) · prev: [In-graph NMS](in-graph-nms.md) · next: [Accuracy](accuracy.md)
+[← index](../README.md) · prev: [In-graph NMS](in-graph-nms.md) · next: [Manufacturing inspection](inspection.md)

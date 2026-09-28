@@ -45,6 +45,8 @@ turned out to be wrong, and what it took to get a trustworthy one.
 | [CUDA graphs](docs/cuda-graphs.md) | Is the engine ceiling real? | No — ~0.13 ms of it is launch overhead; +11.8% inside A2, and its plateau rises 1167→1249 fps |
 | [In-graph NMS](docs/in-graph-nms.md) | Is the 2.82 MB output worth removing? | On raw gRPC yes — +33% despite a 19% slower engine; on zero-copy paths, no |
 | [Contention](docs/contention.md) | What if N pipelines share the GPU? | MPS gives A2 +32% but B2 nothing — Triton's edge inverts once MPS is on |
+| [Manufacturing inspection](docs/inspection.md) | What does a visual QA line cost to serve? | Three stages, no defect labels: locate the part, judge it with a good-parts-only anomaly model, explain the rare flag |
+| [Inspection encoders](docs/inspection-models.md) | Which anomaly encoders are fast enough? | At a 256 crop all cost 0.29-1.35 ms; EfficientAD-S is the costliest CNN (1.64x the WRN50 backbone); batching crops saves 45-62%, more than batching frames |
 | [Accuracy](docs/accuracy.md) | Does the pipeline preserve the model? | Yes, for every model and both engine shapes; batching is accuracy-free; nearest-neighbour resize cost ~0.6 mAP (fixed) |
 | [Precision](docs/precision.md) | Is INT8 worth it? | +32.8% throughput for −1.55 mAP — and it beats downgrading the model; sparsity ~+1%, not worth it |
 | [Reproduce](docs/reproduce.md) | How do I run this myself? | Four commands from a clean clone |

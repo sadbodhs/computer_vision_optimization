@@ -78,6 +78,9 @@ nav:
     - CUDA graphs: cuda-graphs.md
     - In-graph NMS: in-graph-nms.md
     - Contention: contention.md
+  - Manufacturing inspection:
+    - Overview: inspection.md
+    - Inspection encoders: inspection-models.md
   - What it costs:
     - Accuracy: accuracy.md
     - Precision: precision.md
