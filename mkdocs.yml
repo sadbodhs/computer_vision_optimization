@@ -35,6 +35,9 @@ extra:
     - icon: material/home
       link: https://sadbodhs.github.io/
       name: Sadbodh — the bench
+    - icon: material/factory
+      link: https://sadbodhs.github.io/manufacturing_inspection/
+      name: The manufacturing inspection study
     - icon: material/eye-outline
       link: https://sadbodhs.github.io/vlm_inference_optimization/
       name: The VLM serving study
@@ -79,8 +82,7 @@ nav:
     - In-graph NMS: in-graph-nms.md
     - Contention: contention.md
   - Manufacturing inspection:
-    - Overview: inspection.md
-    - Inspection encoders: inspection-models.md
+    - Now its own study: inspection.md
   - What it costs:
     - Accuracy: accuracy.md
     - Precision: precision.md
