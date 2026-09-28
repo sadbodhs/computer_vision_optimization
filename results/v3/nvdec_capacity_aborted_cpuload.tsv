@@ -1,0 +1,14 @@
+source	sessions	rep	wall_s	agg_fps	cameras_30fps	failed	dec_util_max	valid
+real_1080p.mp4	2	1	32.55	756	25.2	0	100	yes
+real_1080p.mp4	32	1	511.93	769	25.6	0	100	yes
+real.mp4	1	1	5.42	2268	75.6	0	87	yes
+real_1080p.mp4	4	1	63.98	769	25.6	0	100	yes
+real.mp4	32	1	155.12	2537	84.6	0	100	yes
+real_1080p.mp4	1	1	16.63	740	24.7	0	100	yes
+real.mp4	8	1	38.92	2528	84.3	0	100	yes
+real_1080p.mp4	16	1	256.18	768	25.6	0	100	yes
+real.mp4	16	1	77.61	2536	84.5	0	100	yes
+real.mp4	2	1	10.01	2456	81.9	0	100	yes
+real_1080p.mp4	8	1	128.35	767	25.6	0	100	yes
+real.mp4	4	1	19.52	2521	84.0	0	100	yes
+real_1080p.mp4	8	2	128.46	766	25.5	0	100	yes

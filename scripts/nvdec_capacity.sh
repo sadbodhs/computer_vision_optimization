@@ -48,12 +48,20 @@ if ! docker exec $C test -s /work/videos/real_1080p.mp4; then
     -vf scale=1920:1080 -c:v h264_nvenc -b:v 8M -g 30 /work/videos/real_1080p.mp4
 fi
 
-[ -f "$OUT" ] || printf "source\tsessions\trep\twall_s\tagg_fps\tcameras_30fps\tfailed\tdec_util_max\tvalid\n" > "$OUT"
+[ -f "$OUT" ] || printf "source\tsessions\trep\twall_s\tagg_fps\tcameras_30fps\tfailed\tdec_util_max\tvalid\tload_start\tload_end\n" > "$OUT"
+# Every run waits for a quiet host (the same bar as leakfix_check.sh: 1-minute
+# load under 3) and records the load it started and ended under: an earlier
+# attempt was overrun mid-sweep by an unrelated job pushing the load to 82.
+wait_quiet() {
+  until awk -v l="$(cut -d' ' -f1 /proc/loadavg)" 'BEGIN{exit !(l < 3.0)}'; do sleep 30; done
+}
 for REP in 1 2 3; do
   ORDER=$(for s in real.mp4 real_1080p.mp4; do for n in 1 2 4 8 16 32; do echo "$s:$n"; done; done |
           python3 -c "import random,sys; l=sys.stdin.read().split(); random.Random($REP).shuffle(l); print(' '.join(l))")
   for c in $ORDER; do
     src=${c%%:*}; n=${c##*:}
+    wait_quiet
+    L0=$(cut -d' ' -f1 /proc/loadavg)
     # sample decoder utilisation in the background while the sessions run
     nvidia-smi --query-gpu=utilization.decoder --format=csv,noheader,nounits -lms 200 > /tmp/nvdec_util.$$ &
     SMI=$!
@@ -75,7 +83,7 @@ w=float('$wall'); n=int('$n'); f=int('$failed')
 agg=(n-f)*$FRAMES_PER_SESSION/w
 u=int('${umax:-0}' or 0)
 print('\t'.join(['$src', str(n), '$REP', '%.2f'%w, '%.0f'%agg, '%.1f'%(agg/30), str(f), str(u),
-                 'yes' if (u > 50 and f == 0) else 'NO']))" >> "$OUT"
+                 'yes' if (u > 50 and f == 0) else 'NO', '$L0', '$(cut -d' ' -f1 /proc/loadavg)']))" >> "$OUT"
     tail -1 "$OUT"
     sleep 3
   done
