@@ -120,6 +120,30 @@ __global__ void compact_candidates_kernel(
   }
 }
 
+// --batch N: the same compaction for N images of one batched pass. blockIdx.y is
+// the image; each image gets its own counter and its own max_dets slots.
+__global__ void compact_candidates_batched_kernel(
+    const float* __restrict__ out,   // [N,84,8400] channel-major per image
+    int num_classes, int num_anchors, float conf_thr,
+    GPUDet* __restrict__ dets, int* __restrict__ d_counts, int max_dets) {
+  int a = blockIdx.x * blockDim.x + threadIdx.x;
+  int img = blockIdx.y;
+  if (a >= num_anchors) return;
+  const float* o = out + (size_t)img * (4 + num_classes) * num_anchors;
+  float best = 0.f; int best_c = -1;
+  for (int c = 0; c < num_classes; ++c) {
+    float s = o[(4 + c) * num_anchors + a];
+    if (s > best) { best = s; best_c = c; }
+  }
+  if (best < conf_thr) return;
+  float cx = o[0 * num_anchors + a], cy = o[1 * num_anchors + a];
+  float w = o[2 * num_anchors + a], h = o[3 * num_anchors + a];
+  int slot = atomicAdd(&d_counts[img], 1);
+  if (slot < max_dets) {
+    dets[(size_t)img * max_dets + slot] = {cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2, best, best_c};
+  }
+}
+
 static int nms_count(const GPUDet* dets, int n, float iou_thr) {
   std::vector<GPUDet> v(dets, dets + n);
   std::sort(v.begin(), v.end(), [](const GPUDet& a, const GPUDet& b) { return a.score > b.score; });
@@ -190,6 +214,9 @@ struct StreamCtx {
   double warmup = 1.0;
   std::chrono::steady_clock::time_point t_start{};
   std::atomic<long>* late = nullptr;
+  // --batch N (capacity mode only): N frames per TensorRT pass on a dynamic-batch
+  // engine, as flow D's server does, but in-process with no Triton.
+  int batch = 1;
 };
 
 // Reported in the JSON so a run can never be mislabelled: capture is allowed to
@@ -210,22 +237,84 @@ static void runStream(StreamCtx* ctx) {
   for (int i = 0; i < in_dims.nbDims; ++i) in_size *= in_dims.d[i];
   for (int i = 0; i < out_dims.nbDims; ++i) out_size *= out_dims.d[i];
   in_size *= sizeof(float); out_size *= sizeof(float);
+  // --batch N: a dynamic-batch engine reports -1 for the batch dimension, so the
+  // sizes come from the frame geometry and the shape is set on the context.
+  const int B = ctx->batch;
+  const size_t FRAME_BYTES = (size_t)3 * IMG * IMG * sizeof(float);
+  const size_t OUT_FRAME_BYTES = (size_t)(4 + NUM_CLASSES) * NUM_ANCHORS * sizeof(float);
+  if (B > 1) {
+    if (!exec->setInputShape(in_name, Dims4{B, 3, IMG, IMG})) {
+      std::cerr << "engine does not accept batch " << B << " (needs a dynamic-batch engine)" << std::endl;
+      return;
+    }
+    in_size = B * FRAME_BYTES;
+    out_size = B * OUT_FRAME_BYTES;
+  }
 
   float *d_in = nullptr, *d_out = nullptr;
   CUDA_CHECK(cudaMalloc(&d_in, in_size));
   CUDA_CHECK(cudaMalloc(&d_out, out_size));
   GPUDet* d_dets; int* d_count;
-  CUDA_CHECK(cudaMalloc(&d_dets, MAX_DETS * sizeof(GPUDet)));
-  CUDA_CHECK(cudaMalloc(&d_count, sizeof(int)));
+  CUDA_CHECK(cudaMalloc(&d_dets, (size_t)B * MAX_DETS * sizeof(GPUDet)));
+  CUDA_CHECK(cudaMalloc(&d_count, B * sizeof(int)));
   cudaStream_t stream;
   CUDA_CHECK(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking));
   exec->setTensorAddress(in_name, d_in);
   exec->setTensorAddress(out_name, d_out);
   GPUDet* h_dets; int* h_count;
-  CUDA_CHECK(cudaMallocHost((void**)&h_dets, MAX_DETS * sizeof(GPUDet)));
-  CUDA_CHECK(cudaMallocHost((void**)&h_count, sizeof(int)));
+  CUDA_CHECK(cudaMallocHost((void**)&h_dets, (size_t)B * MAX_DETS * sizeof(GPUDet)));
+  CUDA_CHECK(cudaMallocHost((void**)&h_count, B * sizeof(int)));
 
-  if (ctx->mode == "file" || ctx->mode == "paced") {
+  if (B > 1) {
+    // ---- capacity mode, N frames per pass ----
+    // The same work per frame as the batch-1 path (upload, inference, GPU compact,
+    // tiny D2H, CPU NMS), done for N consecutive frames per TensorRT pass. Every
+    // frame of a batch is reported with the batch's latency: it waited for all of it.
+    using clk = std::chrono::steady_clock;
+    const std::vector<char>& buf = g_frame_buf;
+    const size_t n_frames = buf.size() / FRAME_BYTES;
+    if (n_frames == 0) { std::cerr << "no frames in " << ctx->file_path << std::endl; return; }
+    long fi = ((long)ctx->stream_id * B) % (long)n_frames;
+    const auto t0 = clk::now();
+    while (std::chrono::duration<double>(clk::now() - t0).count() <= ctx->duration) {
+      auto ts = clk::now();
+      StageTimes st;
+      for (int b = 0; b < B; ++b) {
+        long f = (fi + b) % (long)n_frames;
+        CUDA_CHECK(cudaMemcpyAsync((char*)d_in + b * FRAME_BYTES, buf.data() + f * FRAME_BYTES,
+                                   FRAME_BYTES, cudaMemcpyHostToDevice, stream));
+      }
+      CUDA_CHECK(cudaStreamSynchronize(stream));
+      st.h2d = std::chrono::duration<double, std::milli>(clk::now() - ts).count();
+      auto t1 = clk::now();
+      exec->enqueueV3(stream);
+      CUDA_CHECK(cudaMemsetAsync(d_count, 0, B * sizeof(int), stream));
+      compact_candidates_batched_kernel<<<dim3((NUM_ANCHORS + 255) / 256, B), 256, 0, stream>>>(
+          d_out, NUM_CLASSES, NUM_ANCHORS, 0.25f, d_dets, d_count, MAX_DETS);
+      CUDA_CHECK(cudaMemcpyAsync(h_count, d_count, B * sizeof(int), cudaMemcpyDeviceToHost, stream));
+      CUDA_CHECK(cudaStreamSynchronize(stream));
+      st.infer = std::chrono::duration<double, std::milli>(clk::now() - t1).count();
+      auto t2 = clk::now();
+      int kept = 0;
+      for (int b = 0; b < B; ++b) {
+        int n = std::min(h_count[b], MAX_DETS);
+        CUDA_CHECK(cudaMemcpy(h_dets + (size_t)b * MAX_DETS, d_dets + (size_t)b * MAX_DETS,
+                              n * sizeof(GPUDet), cudaMemcpyDeviceToHost));
+        kept += nms_count(h_dets + (size_t)b * MAX_DETS, n, 0.45f);
+      }
+      st.nms = std::chrono::duration<double, std::milli>(clk::now() - t2).count();
+      st.n = B;   // the stage report divides by n, so these become per-frame shares
+      double lat = std::chrono::duration<double, std::milli>(clk::now() - ts).count();
+      {
+        std::lock_guard<std::mutex> lk(*ctx->lat_mtx);
+        for (int b = 0; b < B; ++b) ctx->latencies->push_back(lat);
+      }
+      { std::lock_guard<std::mutex> lk(g_stages.mtx); g_stages.add(st); }
+      ctx->det_count->fetch_add(kept);
+      ctx->frame_count->fetch_add(B);
+      fi = (fi + B) % (long)n_frames;
+    }
+  } else if (ctx->mode == "file" || ctx->mode == "paced") {
     const std::vector<char>& buf = g_frame_buf;
     const size_t n_frames = buf.size() / in_size;
     if (n_frames == 0) { std::cerr << "no frames in " << ctx->file_path << std::endl; return; }
@@ -453,6 +542,7 @@ int main(int argc, char** argv) {
   std::string phase = "random";
   unsigned seed = 1;
   double warmup = 1.0;
+  int batch = 1;
   for (int i = 1; i < argc; ++i) {
     std::string a = argv[i];
     if (a == "--engine" && i + 1 < argc) engine_path = argv[++i];
@@ -466,6 +556,11 @@ int main(int argc, char** argv) {
     else if (a == "--phase" && i + 1 < argc) phase = argv[++i];
     else if (a == "--seed" && i + 1 < argc) seed = (unsigned)std::stoul(argv[++i]);
     else if (a == "--warmup" && i + 1 < argc) warmup = std::stod(argv[++i]);
+    else if (a == "--batch" && i + 1 < argc) batch = std::stoi(argv[++i]);
+  }
+  if (batch > 1 && (mode != "file" || use_graph)) {
+    std::cerr << "--batch > 1 is capacity mode only (--mode file), without --cuda-graph" << std::endl;
+    return 2;
   }
   if (mode == "paced" && cam_fps <= 0) { std::cerr << "--mode paced needs --fps > 0" << std::endl; return 2; }
   if (phase != "random" && phase != "sync") { std::cerr << "--phase must be random|sync" << std::endl; return 2; }
@@ -492,7 +587,7 @@ int main(int argc, char** argv) {
   for (int i = 0; i < streams; ++i) {
     ctxs[i] = {url, engine, i, &frames, &dets, &running, duration, mode, file_path, &latencies, &lat_mtx, use_graph};
     ctxs[i].fps = cam_fps; ctxs[i].phase = phase; ctxs[i].seed = seed; ctxs[i].warmup = warmup;
-    ctxs[i].t_start = t_start; ctxs[i].late = &late;
+    ctxs[i].t_start = t_start; ctxs[i].late = &late; ctxs[i].batch = batch;
     threads.emplace_back(runStream, &ctxs[i]);
   }
   for (auto& t : threads) t.join();
@@ -510,6 +605,7 @@ int main(int argc, char** argv) {
   };
   double sn = g_stages.n ? g_stages.n : 1;
   std::cout << "{\"pipeline\":\"cpp_trt_cuda\",\"mode\":\"" << mode << "\",\"streams\":" << streams
+            << ",\"batch\":" << batch
             << ",\"frames\":" << n << ",\"detections\":" << dets.load() << ",\"fps\":" << (n / dt)
             << ",\"lat_ms_p50\":" << pct(0.50) << ",\"lat_ms_p95\":" << pct(0.95)
             << ",\"lat_ms_p99\":" << pct(0.99)
