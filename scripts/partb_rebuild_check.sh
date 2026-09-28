@@ -36,7 +36,20 @@ for d in "$ROOT"/triton/models/*/1/model.plan; do
 done
 echo "engines backed up to $BACKUP"
 
+STAMP="$BACKUP/.started"; touch "$STAMP"
 "$ROOT/scripts/export_models.sh" 2>&1 | tail -20
+export_rc=${PIPESTATUS[0]}
+# Measure nothing unless every engine really was rebuilt: the first attempt's
+# export failed and the timings below then ran on the OLD engines.
+stale=0
+for m in yolov8n yolov8s yolo11n yolov8n_dyn yolov8s_dyn yolo11n_dyn yolov8s_u8; do
+  p="$ROOT/triton/models/$m/1/model.plan"
+  if [ ! "$p" -nt "$STAMP" ]; then echo "NOT REBUILT: $m"; stale=1; fi
+done
+if [ "$export_rc" -ne 0 ] || [ "$stale" -ne 0 ]; then
+  echo "export failed (rc=$export_rc) or left engines unrebuilt: nothing measured" >&2
+  exit 1
+fi
 ls -la "$ROOT"/triton/models/{yolov8n,yolov8s,yolo11n,yolov8n_dyn,yolov8s_dyn,yolo11n_dyn,yolov8s_u8}/1/model.plan
 
 printf "what\tarm\tstreams\trep\tvalue\tunit\n" > "$OUT"

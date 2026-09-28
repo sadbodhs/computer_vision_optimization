@@ -15,6 +15,12 @@ docker run --rm --gpus all -v "$ROOT:/work" \
   nvcr.io/nvidia/tritonserver:24.12-py3 bash -c '
 set -euo pipefail
 pip install -q ultralytics onnx onnxsim 2>&1 | tail -1
+# ultralytics pulls in the desktop OpenCV build, which needs X11 libraries
+# (libxcb) this server image does not ship: importing it fails with
+# "libxcb.so.1: cannot open shared object file". The headless build provides
+# the same cv2 without them.
+pip uninstall -y -q opencv-python 2>&1 | tail -1
+pip install -q opencv-python-headless 2>&1 | tail -1
 cd /work/triton/models
 TRTEXEC=/usr/src/tensorrt/bin/trtexec
 # Scratch ONNX goes to /tmp inside this container, NEVER under triton/models: that
