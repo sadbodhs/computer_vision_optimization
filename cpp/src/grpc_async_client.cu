@@ -85,6 +85,21 @@ struct Stats {
   std::mutex mtx;
 };
 
+
+// Unregisters a client's CUDA shared-memory regions when the stream's scope
+// ends, on every path out of it. Left registered, Triton keeps each run's GPU
+// buffers mapped (CUDA IPC) after this process exits, and they pile up across
+// a sweep's runs (827 regions / +2.6 GB after 19 runs in the companion study).
+struct ShmRegions {
+  tc::InferenceServerGrpcClient* c;
+  std::vector<std::string> names;
+  ~ShmRegions() { for (auto& n : names) c->UnregisterCudaSharedMemory(n); }
+};
+
+// frames.bin, loaded once in main and shared read-only by every stream (was one
+// 1.47 GB copy per stream: 32+ streams were OOM-killed)
+static std::vector<char> g_frame_buf;
+
 static void run_stream(int stream_id, const std::string& model, const std::string& file_path,
                        double duration, Stats* stats) {
   const int IMG = 640, NUM_CLASSES = 80, NUM_ANCHORS = 8400;
@@ -105,6 +120,7 @@ static void run_stream(int stream_id, const std::string& model, const std::strin
   std::string out_region = "aout_" + std::to_string(stream_id) + "_" + std::to_string(getpid());
   CHECK_OK(client->RegisterCudaSharedMemory(in_region, in_handle, 0, IN_BYTES));
   CHECK_OK(client->RegisterCudaSharedMemory(out_region, out_handle, 0, OUT_BYTES));
+  ShmRegions shm_regions{client.get(), {in_region, out_region}};  // unregistered after the drain below
 
   std::vector<int64_t> in_shape = {1, 3, IMG, IMG};
   tc::InferInput* inp = nullptr;
@@ -116,12 +132,9 @@ static void run_stream(int stream_id, const std::string& model, const std::strin
   std::vector<tc::InferInput*> inputs = {inp};
   std::vector<const tc::InferRequestedOutput*> outputs = {out};
 
-  // load frames
-  std::ifstream f(file_path, std::ios::binary);
-  f.seekg(0, std::ios::end); size_t sz = f.tellg(); f.seekg(0, std::ios::beg);
-  size_t n_frames = sz / IN_BYTES;
-  std::vector<char> buf(sz);
-  f.read(buf.data(), sz);
+  const std::vector<char>& buf = g_frame_buf;
+  size_t n_frames = buf.size() / IN_BYTES;
+  if (n_frames == 0) { std::cerr << "no frames in " << file_path << std::endl; return; }
 
   tc::InferOptions options(model);
 
@@ -228,6 +241,12 @@ int main(int argc, char** argv) {
   }
 
   Stats stats;
+  {
+    std::ifstream f(file_path, std::ios::binary);
+    f.seekg(0, std::ios::end); size_t sz = f.tellg(); f.seekg(0, std::ios::beg);
+    g_frame_buf.resize(sz);
+    f.read(g_frame_buf.data(), sz);
+  }
   std::vector<std::thread> threads;
   for (int i = 0; i < streams; ++i)
     threads.emplace_back(run_stream, i, models[i % models.size()], file_path, duration, &stats);

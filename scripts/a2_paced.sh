@@ -43,6 +43,7 @@ cell() {  # $1 arm  $2 repeat  $3 phase  $4 cameras
     J=$(docker exec "$C" bash -lc "cd /work/cpp/build && ./trt_pipeline_cuda --engine $ENGINE --mode paced --fps $FPS --phase $phase --seed $r --warmup $WARMUP --file frames.bin --streams $N --duration $DURATION" 2>/dev/null)
     c0=0; c1=0; e0=0; e1=0
   else
+    bash "$ROOT/scripts/shm_clear.sh"
     c0=$(met nv_inference_count yolov8s); e0=$(met nv_inference_exec_count yolov8s)
     J=$(docker exec "$C" bash -lc "cd /work/cpp/build && ./trt_grpc_cuda --mode paced --fps $FPS --phase $phase --seed $r --warmup $WARMUP --model yolov8s --file frames.bin --streams $N --duration $DURATION" 2>/dev/null)
     c1=$(met nv_inference_count yolov8s); e1=$(met nv_inference_exec_count yolov8s)

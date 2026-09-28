@@ -29,7 +29,8 @@ FPS=${FPS:-30}
 SETTLE=${SETTLE:-3}
 CAMS=${CAMS:-"1 4 8 16 32 48 56"}
 PHASES=${PHASES:-"random sync"}
-ARMS=(b2 nobatch dnow b3_500 b3_0)
+# ARMS_LIST picks a subset (e.g. for a re-check slice); default is the full sweep
+read -ra ARMS <<< "${ARMS_LIST:-b2 nobatch dnow b3_500 b3_0}"
 
 CFG=$ROOT/triton/models/yolov8s_dyn/config.pbtxt
 # The config is tracked in git, so git is the restore source - not a temp copy
@@ -100,6 +101,7 @@ for r in $(seq 1 "$REPEATS"); do
     for phase in $PHASES; do
       for N in $CAMS; do
         sleep "$SETTLE"
+        bash "$ROOT/scripts/shm_clear.sh"
         c0=$(met nv_inference_count $MODEL); e0=$(met nv_inference_exec_count $MODEL)
         q0=$(met nv_inference_queue_duration_us $MODEL); s0=$(met nv_inference_request_success $MODEL)
         f0=$(foreign)

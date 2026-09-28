@@ -54,6 +54,7 @@ CFGEOF
 }
 
 client() {  # $1 arm  $2 cameras  $3 duration
+  bash "$ROOT/scripts/shm_clear.sh"
   local common="--mode paced --fps $FPS --phase random --seed 1 --warmup $WARMUP --file frames.bin --streams $2 --duration $3"
   case $1 in
     a2) docker exec "$C" bash -lc "cd /work/cpp/build && ./trt_pipeline_cuda --engine /models/yolov8s/1/model.plan $common" ;;
