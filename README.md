@@ -50,6 +50,7 @@ turned out to be wrong, and what it took to get a trustworthy one.
 | [Precision](docs/precision.md) | Is INT8 worth it? | +32.8% throughput for −1.55 mAP — and it beats downgrading the model; sparsity ~+1%, not worth it |
 | [Reproduce](docs/reproduce.md) | How do I run this myself? | Four commands from a clean clone |
 | [On another GPU](docs/other-gpus.md) | Do these numbers apply to my card? | Timers and software behaviour carry over; shapes carry over; positions do not. Keep A2/B2 under ~80% GPU utilisation |
+| [Decoder capacity](docs/nvdec.md) | How many cameras can NVDEC decode? | No session limit; ~768 fps at 1080p (25 cameras at 30 fps), ~2,530 at 640×360 (84). At 1080p the decoder, not the detector, caps one 3090 |
 | [Roadmap](docs/roadmap.md) | What is *not* covered? | No accuracy axis, no INT8; MPS and CUDA graphs now measured |
 
 **Two reading paths.** Start-to-finish: the table above is in reading order —

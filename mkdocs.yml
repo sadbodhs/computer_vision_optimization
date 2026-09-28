@@ -89,4 +89,5 @@ nav:
   - Practical:
     - Reproduce: reproduce.md
     - On another GPU: other-gpus.md
+    - Decoder capacity: nvdec.md
     - Roadmap: roadmap.md

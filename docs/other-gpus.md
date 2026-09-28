@@ -1,6 +1,6 @@
 # On another GPU — what transfers, and how to redo it
 
-[← index](../README.md) · prev: [Reproduce](reproduce.md) · next: [Roadmap](roadmap.md)
+[← index](../README.md) · prev: [Reproduce](reproduce.md) · next: [Decoder capacity](nvdec.md)
 
 Every number in this study was measured on **one RTX 3090** (2,100 MHz max SM
 clock, 350 W power limit, PCIe Gen4 x16). A reader with a different card needs to
@@ -117,4 +117,4 @@ TSVs plus a note of the card's power limit and driver. See
 
 ---
 
-[← index](../README.md) · prev: [Reproduce](reproduce.md) · next: [Roadmap](roadmap.md)
+[← index](../README.md) · prev: [Reproduce](reproduce.md) · next: [Decoder capacity](nvdec.md)

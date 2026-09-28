@@ -1,6 +1,6 @@
 # Roadmap — what this study does *not* cover
 
-[← index](../README.md) · prev: [On another GPU](other-gpus.md)
+[← index](../README.md) · prev: [Decoder capacity](nvdec.md)
 
 This study measures one axis thoroughly: **the serving and transport layer**, at
 FP16, at 640×640, for YOLO detection on one GPU. Below is what it deliberately
@@ -178,8 +178,9 @@ layer-fusion inspection (`--dumpLayerInfo`, `--profilingVerbosity=detailed`).
 **Profiling method** — this repo teaches you to *measure* known stages; it does not
 teach you to *find* an unknown bottleneck. Nsight Systems + NVTX ranges would.
 
-**System** — NVDEC session limits, multi-GPU scaling, GPU clocks/power limits and
-thermal throttling, CPU affinity/NUMA.
+**System** — multi-GPU scaling, GPU clocks/power limits and thermal throttling, CPU
+affinity/NUMA. *(NVDEC capacity is now measured: [decoder capacity](nvdec.md). No session
+limit; at 1080p one decoder feeds ~25 cameras, fewer than the detector can serve.)*
 
 **Multi-node orchestration (Ray)** — everything here stops at one GPU in one box.
 The layer that takes a pipeline past that is orchestration, and Ray is the obvious
@@ -213,4 +214,4 @@ committed under `results/` with a provenance note. See
 
 ---
 
-[← index](../README.md) · prev: [On another GPU](other-gpus.md)
+[← index](../README.md) · prev: [Decoder capacity](nvdec.md)
