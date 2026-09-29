@@ -120,6 +120,8 @@ does cost something measurable:
 | FP16 | 1023.26 qps | 0.47348 |
 | **INT8 (calibrated)** | **1358.72 qps (+32.8%)** | **0.45794 (−1.55 points)** |
 
+*Throughput sources: [precision](precision.md#calibrated-int8-the-actual-result).*
+
 That trade, and why it beats downgrading the model, is in
 [precision](precision.md#calibrated-int8-the-actual-result).
 

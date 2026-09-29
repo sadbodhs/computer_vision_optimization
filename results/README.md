@@ -12,7 +12,7 @@ What each file is, and how it maps to the tables in the top-level README/STORY.
 | `v2/all_*.tsv` | **v2 (corrected)** | The 4-arm capacity + RTSP sweep from `scripts/benchmark_v2.sh`. One JSON per repeat, `arm|json`. |
 | `v2/gpu_*.csv`, `gpu_*.csv`, `v3/gpu_*.csv` | v2/v3 | GPU util/mem samples (`scripts/gpu_sample.sh`) taken during runs. |
 | `capacity_table.tsv` | — | The canonical capacity numbers (flow × concurrency → fps, latency) as data, so `scripts/make_plots.py` can regenerate the figures. Mirrors the table in `docs/results.md`. |
-| `stage_decomposition.tsv` | — | Per-stage per-frame times behind the stage-decomposition figure. |
+| `stage_decomposition.tsv` | — | Per-stage per-frame times behind the stage-decomposition figure. The `C2` rows are the Python numpy client in RTSP mode, which sends over raw gRPC (`client_v2.py` applies `--transfer sys` only in file mode), so they are not C2's shared-memory path; their mode column says so. |
 | `comparison_tables.md` | v2 | The fair tables (per-frame latency, per-frame GPU cost) + Flow E (DeepStream). |
 | `v3/parallel_contention_N3.tsv` | v3 | Multi-instance contention at N=3, MPS off (`scripts/parallel_test.sh`): A2, B2 and C2, one row per instance, one repeat. One B2 instance ran at 4.46 ms p50 against 2.22-2.32 for the other two. |
 | `v3/accuracy.tsv` | v3 | COCO val2017 mAP (500 imgs): study chain vs ultralytics reference (`scripts/accuracy_eval.py`, `scripts/accuracy_reference.py`). Includes the nearest-resize row (the original bug) and the calibrated INT8 row. |

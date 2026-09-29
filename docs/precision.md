@@ -74,6 +74,13 @@ against the same reference as everything in [accuracy](accuracy.md):
 | mAP50 | 0.64524 | 0.63192 | −1.33 points |
 | Engine size | 25.6 MB | 14.25 MB | −44% |
 
+*The FP16 throughput is the `trtexec` run recorded in
+[`in_graph_nms.tsv`](../results/v3/in_graph_nms.tsv); the INT8 figure is the
+`int8_calibrated` row of
+[`precision_ceilings.tsv`](../results/v3/precision_ceilings.tsv). That file's own
+FP16 run reads 1020.68 qps, which would make the gain +33.1% — within the
+run-to-run spread of the +32.8% quoted.*
+
 **+32.8% throughput for 1.55 mAP points.** Whether that is a good trade is a
 deployment question, but it is now a question with numbers on both sides.
 

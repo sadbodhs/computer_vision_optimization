@@ -55,7 +55,7 @@ lowest-latency pipeline is *not* the right answer.
 
 ## The four constraints, in detail
 
-### 1. Closed loop — something moves because of the detection
+### 1. Closed loop: something moves because of the detection
 
 Robotics, ADAS, pick-and-place, AR, any actuator. Here latency is not a quality
 metric, it is a **safety and correctness** metric: the world has moved by the
@@ -92,7 +92,7 @@ get nothing from it; closed loops get the most of anyone.
 > cameras fire together, where a short batching window bounds p99. Ship UINT8
 > input. Measure p99, not p50, and measure the whole loop.**
 
-### 2. Stream density — cameras per GPU is the budget
+### 2. Stream density: cameras per GPU is the budget
 
 Surveillance, retail, traffic, process monitoring. Nobody is waiting for the
 answer; it lands in a database, a dashboard or an alert queue. Half a second of
@@ -138,7 +138,7 @@ left.
 > window) beyond that, a second GPU somewhere between 48 and 56. Fix transport
 > before you buy hardware.**
 
-### 3. Wall clock — there is no camera
+### 3. Wall clock: there is no camera
 
 Archive re-indexing, retro-search after an incident, dataset labelling, model
 evaluation. The input is a file, the metric is hours-to-finish, and latency has
@@ -163,7 +163,7 @@ easiest to get wrong by accident.
 > **Offline means batch 8: A2 at batch 8 in-process, or D if you want a server.
 > And INT8 if the accuracy cost is acceptable.**
 
-### 4. Engineering budget — who owns this in two years
+### 4. Engineering budget: who owns this in two years
 
 Sometimes the binding constraint is not the GPU. Two honest cases:
 

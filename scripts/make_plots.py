@@ -143,9 +143,13 @@ def fig_stages():
         left = [l + v for l, v in zip(left, vals)]
     for i, total in enumerate(left):
         ax.text(total + 0.08, i, f"{total:.2f} ms", va="center", fontsize=9, color=FG)
+    # the "C2" rows were measured in RTSP mode, where client_v2.py always uses raw
+    # gRPC - so they are the numpy client without C2's shared memory
+    ax.set_yticks(range(len(flows)))
+    ax.set_yticklabels(["A2", "B2", "Python numpy\n(raw gRPC)"])
     ax.invert_yaxis()
     ax.set_xlim(0, max(left) * 1.18)
-    style(ax, "Where per-frame time goes (capacity mode, concurrency 1)",
+    style(ax, "Where per-frame time goes (one stream)",
           "milliseconds per frame", "")
     # below the axes: inside, it covered the C2 bar
     leg = ax.legend(fontsize=8, frameon=False, loc="upper center",

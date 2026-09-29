@@ -7,7 +7,7 @@ Per-stage wall time for one frame, measured inside each flow with per-stage time
 
 ---
 
-![Stacked per-frame time for A2, B2 and C2](img/stage-decomposition.png)
+![Stacked per-frame time for A2, B2 and the Python numpy client over raw gRPC](img/stage-decomposition.png)
 
 A2 and B2 look nearly the same here, but they are not on the same clock: A2's
 timer includes its 0.25 ms upload and B2's starts after it. Measured on one clock
@@ -28,11 +28,13 @@ serialisation plus numpy NMS, not GPU work.
 
 *Note on the Python column (corrected 2026-09-29):*
 [`results/stage_decomposition.tsv`](../results/stage_decomposition.tsv) labels it
-C2, but its 6.4 ms total does not match C2 as published — numpy + system shared
-memory, **1.69 ms** at concurrency 1 ([results](results.md)) — and its 5.1 ms
-"gRPC + serialize" stage is a tensor going over gRPC, which C2's shared memory
-avoids. The run it came from is not recorded. Read it as the Python client without
-the shared-memory transport, not as C2 today.
+C2, but it is not C2 as published (numpy + system shared memory, **1.69 ms** at
+concurrency 1, [results](results.md)). It was measured with the Python client in
+RTSP mode, and in that mode [`client_v2.py`](../triton/client_v2.py) always sends
+the tensor over raw gRPC — its `--transfer sys` option applies only to file
+replay. So this column is C2's numpy preprocessing and NMS with B1-style
+transport, which is why it shows a 5.1 ms "gRPC + serialize" stage and lands on
+C1's 6.4 ms. The chart above now labels it that way.
 
 The engine itself is 0.97–0.98 ms everywhere. A2 adds 0.25 ms H2D + 0.01 NMS.
 B2's infer stage is 0.18 ms longer than A2's, but B2's upload is outside its timer;

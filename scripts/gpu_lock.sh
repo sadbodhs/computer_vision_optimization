@@ -2,7 +2,10 @@
 # Exclusive GPU lock for anything that measures on this card.
 #
 # The 3090 is shared with other workloads, and this study measured what sharing
-# does to a number: ~24% error, larger than most of the effects it reports. So
+# does to a number: a second GPU process raised A2's latency 69%
+# (docs/contention.md), and even an unrelated CPU-only job made B2 read 23-29%
+# slow (docs/live-batching.md, the leak re-check) - larger than most of the
+# effects it reports. So
 # benchmarks are serialised, never "balanced": one holder at a time, everyone
 # else waits or goes away.
 #

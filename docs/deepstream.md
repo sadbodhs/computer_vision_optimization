@@ -20,7 +20,7 @@ aspect-ratio, symmetric padding) + the marcoslucianops YOLO parser.
 > other flows use class-aware NMS. **Detection counts differ; inference cost does
 > not.** Compare E's timings, not its detection totals.
 
-## E1 — single stream
+## E1: single stream
 
 | Flow | Latency p50 (decode→infer→parse) | fps (RTSP source-bound) |
 |---|---|---|
@@ -32,13 +32,17 @@ aspect-ratio, symmetric padding) + the marcoslucianops YOLO parser.
 *Single-stream RTSP runs ([`comparison_tables.md`](../results/comparison_tables.md)),
 not timed on one shared clock, so read this as "same league", not a ranking. On one shared clock
 ([paced mode](live-batching.md), not run for DeepStream) A2 takes 1.48–1.63 ms and
-B2 1.91–2.50 ms at 1–16 cameras. The fps column is what each run's source
-delivered, not a pipeline limit.*
+B2 1.91–2.50 ms at 1–16 cameras. The fps column is what each run reported, not a
+pipeline limit. E1's 45 fps (and E2's 34.5 per stream at 3 streams) is **above
+what its source can deliver**: the RTSP publisher loops a 30 fps file and runs at
+exactly 30 fps (checked 2026-09-29: 15.3 M frames in 141 h). The excess is
+unexplained — most likely how the harness counted frames against time, not the
+pipeline — so read these fps figures as unreliable; the latencies are unaffected.*
 
 E1 sits between A2 and B2 — all in the same league. DeepStream has no RPC at all
 and its batch window is negligible at batch=1.
 
-## E2 — multi-stream batched
+## E2: multi-stream batched
 
 | Config | Total fps | fps/stream | p50 | GPU util | Reading |
 |---|---|---|---|---|---|

@@ -5,6 +5,6 @@ A2	postprocess	0.01	capacity
 B2	host_to_device	0.00	capacity
 B2	inference	1.16	capacity
 B2	postprocess	0.10	capacity
-C2	host_to_device	0.00	capacity
-C2	inference	5.10	capacity
-C2	postprocess	1.30	capacity
+C2	host_to_device	0.00	rtsp_raw_grpc
+C2	inference	5.10	rtsp_raw_grpc
+C2	postprocess	1.30	rtsp_raw_grpc
