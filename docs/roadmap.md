@@ -140,6 +140,15 @@ per-stream `frames.bin` copy is now fixed in all three clients, and the Triton
 clients' CUDA shared-memory leak is fixed and re-checked — see
 [live traffic](live-batching.md#re-checked-after-a-client-leak).)
 
+Also unexplained: **one live camera is slower than four, but only through Triton**
+(B2 2.47 vs 2.06 ms p50, B3 · 0 µs 3.04 vs 2.73), not in A2 (1.64 vs 1.70), at the
+same 1,695 MHz GPU clock. It looks like a wake-up cost on the gRPC or server side
+when requests are sparse. Untested ways to pin it down: the same run over HTTP
+instead of gRPC; Triton's per-stage duration metrics (queue, compute input,
+infer, output) at 1 and 4 cameras; and client-side gRPC keepalive or a busy-poll
+completion queue. It matters for the single-camera robot or inspection cell,
+where ~0.4 ms is a sixth of the frame's whole turnaround.
+
 ### DeepStream E2 in capacity mode - attempted, harness-bound
 
 Run, and the result is that the measurement does not measure what it needs to.

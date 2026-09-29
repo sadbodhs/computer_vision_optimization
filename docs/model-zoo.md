@@ -267,6 +267,24 @@ the number on it: **past roughly 10 ms of engine time, it is simply true.**
 runs once per prompt. Only the encoder is comparable to the other per-frame costs
 here, so only the encoder is measured. Do not read these as end-to-end SAM.
 
+**Does batching still help at this end?** Not by size — by architecture. The
+companion [manufacturing inspection study](https://sadbodhs.github.io/manufacturing_inspection/) measured GPU time per image at
+batch 1 against batch 8 on these engines:
+
+| Model | Batch 1 | Batch 8, per image | Change |
+|---|---:|---:|---:|
+| yolov8s *(reference)* | 0.998 ms | 0.609 ms | −38.9% |
+| RT-DETR-L | 3.067 ms | 1.916 ms | −37.5% |
+| DINOv2-L | 13.76 ms | 10.80 ms | −21.5% |
+| SAM ViT-H (encoder) | 74.71 ms | 71.48 ms | −4.3% |
+| SAM ViT-B (encoder) | 17.19 ms | 19.64 ms | **+14.3%** |
+
+DINOv2-L, fourteen times yolov8s's cost, still saves a fifth, while SAM-B gets
+*slower* per image at batch 8 — the extra time is in its attention kernels. So
+"big models have no idle GPU left to batch into" is not a rule: measure the batch-8
+engine before building a batching server around one
+([details](https://sadbodhs.github.io/manufacturing_inspection/big-models/)).
+
 ## What failed, and why that is also a result
 
 | Model | Failure |

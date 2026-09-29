@@ -41,10 +41,10 @@ lowest-latency pipeline is *not* the right answer.
 | **Surveillance / VMS, site-scale** | stream density | 16–64 | **B2** | Triton ops (hot reload, metrics) + ≈A2 latency |
 | **City traffic / ANPR** | stream density | 64+ | **D** | nobody is waiting; batching buys 37% cheaper GPU per frame |
 | **Retail analytics** (footfall, queue, shelf) | stream density | 8–64 | **B2** or **D** | latency is irrelevant; pick by team, not by ms |
-| **Manufacturing — line inspection** | closed loop | 1–8 | **A2** | reject actuator fires downstream; a late verdict is a scrapped part |
+| **Manufacturing — line inspection** | closed loop | 1–8 | **A2** | reject actuator fires downstream; a late verdict is a scrapped part. A label-free QA line (locator + anomaly model + rare open-vocabulary check) is costed in the [inspection study](https://sadbodhs.github.io/manufacturing_inspection/): ~10 cameras per 3090 at 4 parts per frame |
 | **Manufacturing — process monitoring** | stream density | 8–32 | **B2** | dashboards, not actuators |
-| **Video archive search / re-indexing** | wall clock | N/A | **D** | throughput is the only axis; 1665–1816 fps |
-| **Dataset labelling / model eval** | wall clock | N/A | **D** | same, and latency is meaningless offline |
+| **Video archive search / re-indexing** | wall clock | N/A | **A2 at batch 8** or **D** | throughput is the only axis; ~1,620 fps either way on one model — the lead was batching, not the server ([correction](batching.md#correction-the-throughput-lead-is-batching-not-triton)) |
+| **Dataset labelling / model eval** | wall clock | N/A | **A2 at batch 8** or **D** | same, and latency is meaningless offline |
 | **Multi-model production serving** | stream density | any | **D** | Triton's scheduler has no hand-rolled equivalent |
 | **Python-only team, any of the above** | engineering | any | **C2** | 1.69 ms — within 0.4 ms of C++, pure-Python client |
 | **Edge appliance / OEM product** | engineering | 1–16 | **E** DeepStream | zero custom code, NVIDIA-supported, config not C++ |
