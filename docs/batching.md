@@ -164,14 +164,16 @@ that misses its stop — at conc=16 a frame waits more than two full camera fram
 ## Triton at its absolute best
 
 Flow D is "B2 with dynamic batching": CUDA shm zero-copy + async in-flight +
-batch-8 engines. Run across **all three models concurrently** — Triton's real
-production scenario, where its scheduler has no hand-rolled equivalent:
+batch-8 engines. Run across **all three models concurrently**, Triton's real
+production scenario. It was first written up as one "where its scheduler has no
+hand-rolled equivalent"; a hand-rolled equivalent was later built, and it wins
+([multi-model correction](#the-multi-model-lead-reverses)):
 
 | Scenario | Total fps | Latency p50 | vs hand-rolled best |
 |---|---|---|---|
 | D: 1 model (yolov8s), conc=16 | 1665 | 73.9 ms wait | +38% vs A2 at batch 1 (1205); **ties A2 at batch 8** ([correction](#correction-the-throughput-lead-is-batching-not-triton)) |
-| **D: 3 models × 6 streams each** | **1799** | 29.4 ms | +49% vs A2 |
-| **D: 3 models × 6 streams (conc=18)** | **1816** | 58.6 ms | +51% vs A2 |
+| **D: 3 models × 6 streams each** | **1799** | 29.4 ms | +49% vs A2 on yolov8s alone at batch 1; **−22% vs A2 on the same three models at batch 8** ([correction](#the-multi-model-lead-reverses)) |
+| **D: 3 models × 6 streams (conc=18)** | **1816** | 58.6 ms | +51% vs A2 on yolov8s alone at batch 1; see the same correction |
 | D: yolov8n alone, conc=8 | 1988 | 24.1 ms | engine cap 2960 effective |
 
 ### Correction: the throughput lead is batching, not Triton
@@ -196,22 +198,54 @@ batch 1 reproduced its published numbers (808 fps single-stream, 1,192 at the
 plateau). D did not quite: 1,624 fps at 8 in flight against the published 1,640,
 and 1,536 at 16 against the published 1,665 (−7.7%).
 
-The multi-model rows above are **not** corrected, because they were never compared
-like-for-like: they serve three models (two lighter than yolov8s) against A2 running
-yolov8s alone at batch 1, and no batched multi-model C++ pipeline was built. Whether
-Triton's scheduler beats a hand-rolled one there is untested.
+### The multi-model lead reverses
+
+*Added 2026-09-29.* The multi-model rows above were left uncorrected at first,
+because nothing like-for-like existed: they serve three models (two lighter than
+yolov8s) and were compared with A2 running yolov8s alone at batch 1. The
+hand-rolled equivalent was then built: `trt_pipeline_cuda --engines a,b,c` runs the
+same three models in **one process and one CUDA context, with no scheduler**, each
+stream driving one model. Measured against D in one session, on the same rebuilt
+engines, 3 interleaved repeats
+([`multimodel_a2_vs_d.sh`](../scripts/multimodel_a2_vs_d.sh), predictions committed
+first):
+
+| Capacity mode, yolov8n + yolov8s + yolo11n | Best throughput | Latency p50 | p99 |
+|---|---:|---:|---:|
+| **A2, batch 8, one process** | **2,280 fps** (3 streams) | **10.5 ms** | 12.4 ms |
+| A2, batch 1, one process | 1,685 fps (6 streams) | 3.6 ms | 4.8 ms |
+| D, Triton multi-model | 1,780 fps (9 streams) | 29.6 ms | 200 ms |
+
+**A plain batched loop beats Triton's multi-model serving by 28%, at a third of its
+median latency and a sixteenth of its tail.** Even at batch 1 the in-process
+pipeline lands only 5.3% short of D (1,685 vs 1,780 fps) at an eighth of its latency, so most of the published
+"+49–51%" was the comparison itself: three models, two of them light, against
+yolov8s alone. D reproduced its published figures (1,780 fps at 9 streams, 1,766 at
+18, against 1,799 and 1,816).
+
+Why D falls behind at this rate was not measured. Per-request overhead in the
+server and its client becoming the limit near 2,000 requests a second is a
+plausible reading, not an established one. What was measured is the outcome: on
+this workload, nothing about multi-model serving required Triton's scheduler.
+
+The prediction was a tie (within 5%); A2 won by 28%, so it failed in A2's favour.
+Batch-1 A2 reaching at least 1,450 fps held, and so did D reproducing its published
+range within 10%.
 
 ### This is the answer to "shouldn't Triton win?"
 
-On one model, no: fed properly it ties a batched in-process pipeline on throughput
-and costs more latency ([correction above](#correction-the-throughput-lead-is-batching-not-triton)).
-The ~50% first reported here compared it with C++ at batch 1. The same server with
-naive clients (C1: 225 fps) still loses by 8×.
+On throughput, on one model or three, no: a batched in-process pipeline ties it on
+one model and beats it on three, at a fraction of its latency
+([single model](#correction-the-throughput-lead-is-batching-not-triton),
+[three models](#the-multi-model-lead-reverses)). The ~50% first reported here
+compared it with C++ at batch 1 on one model. The same server with naive clients
+(C1: 225 fps) still loses by 8×.
 
-**Triton's framework is only as good as its client; its scheduler is the
-irreplaceable part.** You can hand-roll zero-copy and NVDEC in an afternoon. You
-cannot hand-roll a multi-model scheduler that keeps a GPU 80% busy across three
-engines and eighteen streams.
+Triton's case is operational, not speed: one server for many clients and processes,
+model reloads without restarts, metrics, and a standard protocol. Those are real,
+and this study does not measure them. It first said the scheduler was "the
+irreplaceable part" and that nobody could hand-roll a multi-model scheduler that keeps
+the GPU busy; a one-process loop with batching did better.
 
 ## Configuration
 

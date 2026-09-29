@@ -118,7 +118,7 @@ process — not how long a frame from a live camera would wait.
 | **A2** C++ TRT full-CUDA | **1.23 ms** | 1219 fps; **1622 fps at batch 8** | Lowest latency, in-process control, zero dependencies |
 | **B2** Triton + CUDA shm | 1.28 ms‡ | 1131 fps | Triton without the tax — ≈A2 latency, plus server ops |
 | **C2** Triton + numpy + sys-shm | 1.69 ms | 1038 fps | Python within 0.4 ms of C++ |
-| **D** Triton async + dynamic batching | 6.2–74 ms† | **1665–1816 fps** | Highest throughput; latency is the price |
+| **D** Triton async + dynamic batching | 6.2–74 ms† | **1665–1816 fps** | High throughput; latency is the price. A batched in-process loop matches it on one model and beats it on three |
 | **E1** DeepStream | 1.50 ms | 45 fps/stream (source-bound) | Zero custom code, integrated NVDEC→infer |
 | B1 raw gRPC · C1 torch | 3.27 / 6.4 ms | 496 / 225 fps | What "just use the server" costs if you feed it naively |
 
@@ -140,9 +140,11 @@ highest single-model throughput, **and a batched in-process C++ pipeline ties it
 first published here compared D at batch 8, and on three models, with C++ at batch 1
 on one; the lead was the batch size
 ([correction](docs/batching.md#correction-the-throughput-lead-is-batching-not-triton)).
-The same server with a naive client still loses by 8×. Triton's framework is only as
-good as its client; whether its multi-model scheduler beats a hand-rolled one is
-untested.
+On three models the lead reverses: one batched in-process loop reaches 2,280 fps
+against Triton's multi-model 1,780, at a third of its latency
+([measured](docs/batching.md#the-multi-model-lead-reverses)). The same server with
+a naive client still loses by 8×. Triton's case is operational (one server for many
+clients, reloads, metrics), which this study does not measure, not throughput.
 
 ### Live cameras rank the pipelines differently
 
@@ -184,7 +186,7 @@ is cheap insurance if that load can spike. Per-load picks, bursts and p99:
 | Live cameras, bursts or load spikes possible | **B3** — B2's client + 0 µs dynamic batching | ~0.5 ms over B2 (paced mode) | bounded to ~1,650 fps | bounded tail in bursts; survives past B2's ~1,131 fps ([measured](docs/live-batching.md)) |
 | Python-only team | **C2** — Triton + numpy + sys-shm | 1.69 ms | 1038 fps | within 0.4 ms of C++ with pure-Python client |
 | Offline / max throughput, one model | **A2 at batch 8** or **D** (a tie) | A2: 10 ms · D: 37 ms† | ~1,620 fps both | same batch-8 engine; A2 in-process with a quarter of D's latency, D if you want a server ([measured](docs/batching.md#correction-the-throughput-lead-is-batching-not-triton)) |
-| Multi-model production serving | **D** — 3 models × async, dynamic batching | 29–59 ms† | **1799–1816 fps** | Triton's scheduler; no batched hand-rolled equivalent was built to compare |
+| Multi-model serving, throughput | **A2 at batch 8**, all models in one process | 10.5 ms | **2,280 fps** (3 models) | beats Triton's multi-model D (1,780 fps, 30 ms) by 28% ([measured](docs/batching.md#the-multi-model-lead-reverses)); pick **D** when you need a shared server, reloads and metrics |
 | Edge product, NVIDIA-supported stack | **E** — DeepStream | 1.50 ms (1 stream) | 45 fps/stream (source-bound) | zero custom code; NVDEC→infer integrated |
 
 At 30 FPS live video (33.3 ms budget) *every* flow keeps up — the differences are
