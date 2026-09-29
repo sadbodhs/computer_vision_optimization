@@ -22,6 +22,7 @@ extern "C" {
 #include <fstream>
 #include <iostream>
 #include <mutex>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <random>
@@ -546,6 +547,7 @@ int main(int argc, char** argv) {
   for (int i = 1; i < argc; ++i) {
     std::string a = argv[i];
     if (a == "--engine" && i + 1 < argc) engine_path = argv[++i];
+    else if (a == "--engines" && i + 1 < argc) engine_path = argv[++i];   // comma list, see below
     else if (a == "--url" && i + 1 < argc) url = argv[++i];
     else if (a == "--streams" && i + 1 < argc) streams = std::stoi(argv[++i]);
     else if (a == "--duration" && i + 1 < argc) duration = std::stod(argv[++i]);
@@ -564,8 +566,22 @@ int main(int argc, char** argv) {
   }
   if (mode == "paced" && cam_fps <= 0) { std::cerr << "--mode paced needs --fps > 0" << std::endl; return 2; }
   if (phase != "random" && phase != "sync") { std::cerr << "--phase must be random|sync" << std::endl; return 2; }
-  ICudaEngine* engine = loadEngine(engine_path);
-  if (!engine) return 1;
+  // --engines a,b,c: several models in ONE process, streams dealt round-robin
+  // (stream i runs engine i % n). The hand-rolled counterpart of flow D's
+  // multi-model scenario: one process, one CUDA context, no scheduler, each
+  // stream driving its own model. Every engine must share the 84 x 8400 head.
+  std::vector<ICudaEngine*> engines;
+  {
+    std::stringstream ss(engine_path);
+    std::string p;
+    while (std::getline(ss, p, ',')) {
+      ICudaEngine* e = loadEngine(p);
+      if (!e) return 1;
+      engines.push_back(e);
+    }
+  }
+  if (engines.empty()) { std::cerr << "no engine given" << std::endl; return 2; }
+  ICudaEngine* engine = engines[0];
   if (mode == "file" || mode == "paced") {
     std::ifstream f(file_path, std::ios::binary);
     if (!f.good()) { std::cerr << "cannot open " << file_path << std::endl; return 2; }
@@ -585,7 +601,7 @@ int main(int argc, char** argv) {
   std::vector<std::thread> threads;
   std::vector<StreamCtx> ctxs(streams);
   for (int i = 0; i < streams; ++i) {
-    ctxs[i] = {url, engine, i, &frames, &dets, &running, duration, mode, file_path, &latencies, &lat_mtx, use_graph};
+    ctxs[i] = {url, engines[i % engines.size()], i, &frames, &dets, &running, duration, mode, file_path, &latencies, &lat_mtx, use_graph};
     ctxs[i].fps = cam_fps; ctxs[i].phase = phase; ctxs[i].seed = seed; ctxs[i].warmup = warmup;
     ctxs[i].t_start = t_start; ctxs[i].late = &late; ctxs[i].batch = batch;
     threads.emplace_back(runStream, &ctxs[i]);
@@ -605,7 +621,7 @@ int main(int argc, char** argv) {
   };
   double sn = g_stages.n ? g_stages.n : 1;
   std::cout << "{\"pipeline\":\"cpp_trt_cuda\",\"mode\":\"" << mode << "\",\"streams\":" << streams
-            << ",\"batch\":" << batch
+            << ",\"batch\":" << batch << ",\"engines\":" << engines.size()
             << ",\"frames\":" << n << ",\"detections\":" << dets.load() << ",\"fps\":" << (n / dt)
             << ",\"lat_ms_p50\":" << pct(0.50) << ",\"lat_ms_p95\":" << pct(0.95)
             << ",\"lat_ms_p99\":" << pct(0.99)
