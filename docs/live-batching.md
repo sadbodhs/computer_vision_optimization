@@ -64,7 +64,7 @@ waiting together, and no frame is held back to be batched.
 
 ![Per-frame p99 turnaround against offered load, unsynchronised and synchronised cameras](img/b3-paced.png)
 
-## 1. Below capacity, batching only adds latency — the window decides how much
+## 1. Below capacity, batching only adds latency: the window decides how much
 
 Unsynchronised cameras, p50 turnaround (ms):
 

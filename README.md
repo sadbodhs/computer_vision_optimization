@@ -33,6 +33,7 @@ turned out to be wrong, and what it took to get a trustworthy one.
 |---|---|---|
 | [Introduction](docs/introduction.md) | Why does this choice even matter? | The plumbing costs more than the model; "fastest" depends on latency vs throughput |
 | [Use cases](docs/use-cases.md) | Which of these is for *my* problem? | Four binding constraints; in three of them the lowest-latency pipeline is the wrong pick |
+| [Sizing rules](docs/sizing-rules.md) | What do I run, at what load, with what latency? | Plan from capacity: A2 ~1,290 fps, B2 ~1,105, batching ~1,660 on one 3090. Keep one-frame pipelines under ~75% of capacity (~80% GPU busy), batch past that, add a GPU past ~87% of batching capacity |
 | [Methodology](docs/methodology.md) | How were these numbers produced? | A benchmark that saturates the source measures the source |
 | [Results](docs/results.md) | How fast is each pipeline? | A2 lowest latency per frame; D's 1665 fps is batch 8 — A2 at batch 8 ties it (1,622 vs 1,624) at a quarter of the latency |
 | [DeepStream](docs/deepstream.md) | What does NVIDIA's own stack do? | 1.50 ms/frame, zero custom code, source-bound at 5.4% GPU |
@@ -180,6 +181,9 @@ is cheap insurance if that load can spike. Per-load picks, bursts and p99:
 [choosing A2, B2 or B3](docs/live-batching.md#6-choosing-a2-b2-or-b3-at-each-load).
 
 ## Decision guide
+
+The same choices as numbered rules with load bands and expected latency:
+[Sizing rules](docs/sizing-rules.md).
 
 | Scenario | Pick | Latency (p50/frame) | Throughput | Why this pick |
 |---|---|---|---|---|

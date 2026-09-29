@@ -48,7 +48,7 @@ not — see [how busy the GPU was](live-batching.md#7-how-busy-the-gpu-was). On 
 So on your GPU: **keep one-frame-at-a-time pipelines under ~80% utilisation**, and
 treat the approach to 100% as the signal to switch to batching.
 
-## Quick estimate — about 20 minutes of GPU time
+## Quick estimate: about 20 minutes of GPU time
 
 ```bash
 scripts/export_models.sh                     # ALWAYS: TensorRT engines are tied to one GPU model

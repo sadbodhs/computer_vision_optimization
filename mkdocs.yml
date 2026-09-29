@@ -64,6 +64,7 @@ nav:
     - Introduction: index.md
     - Overview: overview.md
     - Use cases: use-cases.md
+    - Sizing rules: sizing-rules.md
   - The measurements:
     - Methodology: methodology.md
     - Results: results.md

@@ -1,6 +1,6 @@
 # Use cases — who this is for, and which pipeline fits
 
-prev: [Overview](../README.md) · next: [Methodology](methodology.md)
+prev: [Overview](../README.md) · next: [Sizing rules](sizing-rules.md)
 
 The [decision guide](../README.md#decision-guide) answers *"which flow is fastest
 for X?"*. This page works the other way round: start from **what you are
@@ -219,4 +219,4 @@ Everything else on this site is the evidence for those three lines.
 
 ---
 
-prev: [Overview](../README.md) · next: [Methodology](methodology.md)
+prev: [Overview](../README.md) · next: [Sizing rules](sizing-rules.md)

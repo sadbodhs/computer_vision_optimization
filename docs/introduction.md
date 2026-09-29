@@ -118,6 +118,8 @@ which are paid for somewhere else.
 
 ## What you can take from it
 
+- **If you are sizing a deployment**, [Sizing rules](sizing-rules.md) gives
+  what to run at each load, how busy the GPU will be, and what latency to expect.
 - **If you just want an answer**, the [decision guide](../README.md#decision-guide)
   maps common situations to a pipeline.
 - **If you are choosing a stack**, [Results](results.md) has the tables and the
