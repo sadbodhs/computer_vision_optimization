@@ -5,7 +5,8 @@
 [Model cost](model-scaling.md) held the architecture fixed and varied the price:
 YOLO11 n through x, and the pipeline's non-engine work came out **constant at
 0.256 ms**. This page does the opposite — it holds nothing fixed and sweeps
-**22 models across four tasks**, from a 0.44 ms ResNet50 to an 82.6 ms SAM ViT-H.
+**22 models (20 built) across classification, detection, segmentation, depth and
+foundation backbones**, from a 0.44 ms ResNet50 to an 82.6 ms SAM ViT-H.
 
 And it shows that the earlier "fixed cost" was an artefact of the ladder.
 
@@ -69,9 +70,11 @@ so this table cannot drift from
 
 ## 1. Transport cost is output bytes divided by PCIe bandwidth
 
-That is the entire law. Across 18 models with outputs over 500 KB — four tasks,
-CNNs and transformers, 0.9 ms to 83 ms engines — the implied D2H bandwidth is
-**25.0 GB/s**, and no row deviates by more than a few percent.
+That is the entire law. Across 18 models with outputs over 500 KB — several tasks,
+CNNs and transformers, 0.8 ms to 83 ms engines — the implied D2H bandwidth
+clusters around **25 GB/s**: 21.9–26.9 GB/s across all 18, with the ~1 MB outputs
+(SegFormer, Depth Anything) lowest and the multi-MB outputs within a few percent of
+25–27 GB/s.
 
 | Model | output | D2H | implied |
 |---|---|---|---|
@@ -109,10 +112,10 @@ Same task. Engine cost within 5% of each other. **27x the wire traffic.**
 The difference is one architectural choice: SegFormer emits logits at quarter
 resolution and leaves the upsample to the consumer; DeepLabV3 upsamples inside
 the graph and ships the full-resolution result. DeepLabV3 therefore spends **more
-time moving its answer than computing it** — and the only model in this sweep
-that does ([section 6](#6-the-output-binding-is-fp32-and-that-is-a-choice) halves that
-wire cost and collects 17.5% throughput for it) — 1.305 ms of D2H against 1.120 ms of
-compute.
+time moving its answer than computing it** (1.305 ms of D2H against 1.120 ms of
+compute), the only model in this sweep that does.
+[Section 6](#6-the-output-binding-is-fp32-and-that-is-a-choice) halves that wire cost
+and collects +17.5% throughput for it.
 
 For any dense-prediction model, **where you put the upsample is a bigger
 deployment decision than which backbone you picked.** Nothing else in this study
@@ -140,8 +143,8 @@ they actually buy you here. The answer is more favourable than the folklore:
 | input pixels | 0.284 |
 | **parameters × input pixels** | **0.901** |
 
-Parameters alone explain 80% of the variance in engine time across 22 models
-spanning four tasks and a 189x cost range. That is a good bulk predictor, and it
+Parameters alone explain 80% of the variance in engine time across the 20 built
+models, spanning several tasks and a 189x cost range. That is a good bulk predictor, and it
 is worth saying plainly because "parameter count tells you nothing about latency"
 is a common claim that this data does not support.
 
@@ -247,7 +250,7 @@ and no better product.
   left to lose - but that is reasoning, not a measurement, and no mAP was run on
   an FP16-bound engine. Treat it as open.
 
-## 6. The heavy end, and where the study expires
+## 7. The heavy end, and where the study expires
 
 | Model | engine | transport share |
 |---|---|---|
@@ -278,6 +281,11 @@ batch 1 against batch 8 on these engines:
 | DINOv2-L | 13.76 ms | 10.80 ms | −21.5% |
 | SAM ViT-H (encoder) | 74.71 ms | 71.48 ms | −4.3% |
 | SAM ViT-B (encoder) | 17.19 ms | 19.64 ms | **+14.3%** |
+
+*Batch-1 times here are the inspection study's own runs (GPU compute per image) and
+sit up to ~10% below this page's sweep for the SAM encoders (74.71 vs 82.644 ms for
+SAM ViT-H). Compare the batch-1 and batch-8 columns with each other, not with the
+table above.*
 
 DINOv2-L, fourteen times yolov8s's cost, still saves a fifth, while SAM-B gets
 *slower* per image at batch 8 — the extra time is in its attention kernels. So

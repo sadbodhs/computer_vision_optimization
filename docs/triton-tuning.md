@@ -110,8 +110,11 @@ This matters beyond the knob, because it clears a suspected confound. B2 runs
 with two server-side instances while A2 at `--streams 1` has a single execution
 context, so the published **A2 1.23 ms vs B2 1.28 ms** comparison looked like it
 might be handing Triton double the resources. It is not: at concurrency 1 the
-second instance contributes nothing, and that 0.05 ms really is framework
-overhead.
+second instance contributes nothing. The 0.05 ms gap itself turned out to be a
+clock artefact *(corrected 2026-09-29; this paragraph first called it framework
+overhead)*: A2's timer starts before the frame's upload, B2's after it. On the
+same clock ([paced mode](live-batching.md#6-choosing-a2-b2-or-b3-at-each-load)) A2
+is 0.3–0.9 ms faster per frame.
 
 **2. For B2, `count: 2` is worth far more than the original +30.4% suggested** —
 +34% at four streams and +36% at sixteen, with `count: 4` adding little beyond
@@ -142,20 +145,32 @@ ceiling.
 That is the second such pair on this page. [Section 2](#2-cuda-graphs-and-multiple-instances-are-substitutes-not-additives)
 found CUDA graphs and instances are substitutes rather than additives. So:
 
-> **Instances, CUDA graphs and dynamic batching are three mechanisms for one
-> problem — keeping the GPU busy. Pull whichever lever suits your latency
-> budget, then stop; the second and third are mostly redundant.**
+> **In capacity mode, instances, CUDA graphs and dynamic batching are three
+> mechanisms for one problem — keeping the GPU busy — and the second and third
+> add little.**
+
+Under live traffic they combine *(corrected 2026-09-29)*. A 0 µs batcher on two
+instances (B3 · 0 µs) costs ~0.5 ms per frame at low load, not the 6–74 ms of D's
+8-deep client, and past B2's capacity it is what keeps working: at 48 cameras,
+13 ms per frame against B2's 2.1 s. In synchronised bursts the instance count
+also acts as admission control ([live traffic](live-batching.md)).
 
 Which reframes the tuning advice. The question is not "have I turned everything
-on", it is "which *one* of these fits my latency constraint" — batching if you
-can afford the wait, instances if you cannot, graphs if you need the tail.
+on", it is "which of these fits my load and latency constraint" — a short-window
+batcher when load or bursts can approach capacity, instances for steady low load,
+graphs if you need the tail.
 
 ## Not covered
 
-- Only yolov8s and only flow B2. Flow D's dynamic-batch engines need graph capture
-  per batch size (`graph_spec`) and were not tested.
-- `preferred_batch_size` and `max_queue_delay_microseconds` are still fixed at
-  `[4,8]` / 5000 µs — see [batching](batching.md).
+- Only yolov8s. CUDA graphs were tested on B2 only; flow D's dynamic-batch
+  engines need graph capture per batch size (`graph_spec`) and were not tested.
+- `preferred_batch_size` and `max_queue_delay_microseconds` are swept in
+  [batching](batching.md#the-batching-knobs-swept) (capacity mode) and
+  [live traffic](live-batching.md#4-the-right-window-grows-with-load), where the
+  best window grows with load.
+- Omitting `dynamic_batching` does not turn batching off: Triton auto-completes a
+  0 µs batcher for any `max_batch_size > 0` model without a named scheduler
+  ([measured](live-batching.md#5-triton-turns-batching-on-even-when-you-dont-ask)).
 - Model warmup, response cache, rate limiter, and NVIDIA's Model Analyzer remain
   untouched; see [roadmap](roadmap.md).
 

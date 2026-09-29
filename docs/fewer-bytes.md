@@ -6,7 +6,8 @@
 on CPU paths, CUDA IPC on GPU paths, 3-3.6x either way. This page asks a question
 it never did: **why are there that many bytes?**
 
-Every flow in this study ships `[1,3,640,640]` FP32 — **4.92 MB per frame** —
+Every flow in this study except DeepStream (E) ships `[1,3,640,640]` FP32 —
+**4.92 MB per frame** —
 because the client does the letterbox *and* the divide-by-255 before handing the
 tensor over. But the pixels started life as 8-bit, and the divide is one
 multiply. We are paying 4x the wire cost to deliver data that only needs 8 bits.
@@ -37,7 +38,8 @@ input name as the Div output, so nothing downstream is rewired.
 | **+ FP16 out** | 0.0510 ms | 0.9678 ms | **0.0581 ms** |
 
 **H2D falls 3.72x, and the normalisation is free.** GPU compute goes 0.9792 →
-0.9750 ms — unchanged. TensorRT folds the scale into the first convolution, so
+0.9750 ms — unchanged (the UINT8 engine re-measured at 0.980 ms after the
+2026-09-28 engine rebuild). TensorRT folds the scale into the first convolution, so
 you add two graph nodes and pay nothing for them.
 
 Stacked with the [FP16 output binding](model-zoo.md#6-the-output-binding-is-fp32-and-that-is-a-choice),
@@ -99,14 +101,23 @@ ships its tensor over raw gRPC with no shared memory:
 | **UINT8 input (1.23 MB)** | **336.3 infer/s** | **2226 us** |
 | | **+87.6%** | **−41%** |
 
+*`perf_analyzer` figures; compare the two rows with each other only. Throughput sits
+below 1/latency here, and neither row matches the flow tables (B1: 222 fps · 3.27 ms)
+or [in-graph NMS](in-graph-nms.md) (258.9 fps · 3.789 ms on the same FP32 raw-gRPC
+path).*
+
 And the flow where it **cannot** help, which is the more useful half of the result:
 
 > Batch-8 engine compute is 4.8494 ms ÷ 8 = **0.6062 ms/frame → a 1650 fps
-> ceiling.** D measures **1665 fps**. D is already at the engine ceiling.
+> ceiling.** D measures **1665 fps**, within 1% of it. D is already at the engine
+> ceiling.
 
 D's transport is entirely hidden behind compute, so removing two thirds of it
-removes something that was costing nothing — **0% gain, measured.** The same
-change, on the same GPU, with the same engine: **+87.6% on B1, 0% on D.**
+would remove something that was costing nothing — **0% possible**, inferred from
+the engine ceiling. D was not re-run with UINT8 input; its client still sends FP32
+(see Scope). *(corrected 2026-09-29: previously "0% gain, measured".)* The same
+change, on the same GPU, with the same engine: **+87.6% measured on B1; no headroom
+for it on D.**
 
 That is the study's central rule in its sharpest form yet. The lever is not good
 or bad; it is good exactly where the thing it shrinks was the constraint.
@@ -135,20 +146,23 @@ the same saving becomes invisible.
 
 Note the two numbers that are easily confused. The **transfer** is 3.72x cheaper.
 The **frame** is 16.3% cheaper — because transport was 0.300 ms of a 1.286 ms
-frame, 23.4%, and removing three quarters of 23.4% leaves ~16%. Quote the second
-to a user; the first is an implementation detail.
+frame (23.4%), and cutting it to 0.109 ms removes ~15% of the frame; the measured
+drop is 16.3%. Quote the second to a user; the first is an implementation detail.
 
 So the benefit is not simply "large at low concurrency, shrinking as concurrency
 rises". It is **U-shaped**:
 
 | Regime | Example | Benefit |
 |---|---|---:|
-| Single inference, latency-bound | one camera, closed loop | **−16.3% latency** |
-| Pipelined, compute-bound | D at batch-8 | **0%** |
+| Single inference, latency-bound | one camera, or any live (paced) load below capacity | **−16.3% latency** |
+| Pipelined, compute-bound | D at batch-8 | **0% (ceiling-bound, inferred)** |
 | Payload- or bandwidth-bound | B1 raw gRPC; PCIe saturated | **+87.6%** |
 
-Copies are shared until the bus itself becomes the constraint. D currently moves
-~12.9 GB/s on a ~24 GB/s PCIe 4.0 link — about half. Add streams, add models, or
+Copies are shared until the bus itself becomes the constraint. D currently uploads
+~8.2 GB/s of input (1,665 fps × 4.92 MB; its 2.82 MB output is compacted on the GPU
+and never crosses, see [transport](transport.md)) on a ~24 GB/s PCIe 4.0 link —
+about a third. *(corrected 2026-09-29: previously ~12.9 GB/s, which counted the
+output as well.)* Add streams, add models, or
 put a second pipeline on the same card, and the bytes stop being free again.
 
 ## Which models benefit: input bytes per millisecond of compute

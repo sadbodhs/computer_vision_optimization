@@ -2,10 +2,10 @@
 
 [← index](../README.md) · prev: [Stage decomposition](stage-decomposition.md) · next: [Across architectures](model-zoo.md)
 
-Every other number in this repo is YOLOv8s. That means every conclusion here is
-stated at **one engine cost**, and the study's headline claim — *the GPU is
-almost never the bottleneck at the edge* — has never been tested at the boundary
-where it must stop being true.
+Most numbers in this study are YOLOv8s. That means most conclusions are stated at
+**one engine cost**: at one frame in flight the GPU is mostly waiting on the
+plumbing, but that can only hold while the engine is cheap. This page asks where the
+pipeline's fixed cost stops mattering as the engine gets more expensive.
 
 This page finds the boundary.
 
@@ -55,15 +55,19 @@ already chose**:
 | Flow | Fixed cost | Plumbing < 10% of the frame at |
 |---|---|---|
 | **A2** — zero-copy | 0.256 ms (measured here) | **engine > 2.30 ms** |
-| **B1** — raw gRPC | 1.15 ms transport ([Transport](transport.md)) | **engine > 10.35 ms** |
+| **B1** — raw gRPC | ~2.3 ms (3.27 ms p50 − 0.97 ms engine; [stage decomposition](stage-decomposition.md)) | **engine > ~21 ms** |
 
-A2 crosses over at **YOLO11m**, which is inside this ladder. B1 does not cross
-until roughly four times further up the curve — somewhere around a SegFormer-B2.
+A2 crosses over between **YOLO11m (12.0%) and YOLO11l (8.9%)**, inside this ladder.
+B1 does not cross until roughly nine times further up the curve — past SAM ViT-B's
+encoder (18.7 ms) on [the zoo](model-zoo.md). *(corrected 2026-09-29: this row
+previously used 1.15 ms, which is the output alone
+([in-graph NMS](in-graph-nms.md)); shipping the FP32 input over raw gRPC costs more
+on top — see [moving fewer bytes](fewer-bytes.md).)*
 
 That inverts the obvious reading. Fixing your transport does not only make the
 pipeline faster; **it is what buys you the right to stop thinking about the
 pipeline at all.** Leave it broken and you keep paying attention to plumbing
-across four times as much of the model range.
+across nine times as much of the model range.
 
 ## The fixed cost eats part of your model choice
 
@@ -89,8 +93,10 @@ try afterwards.**
 - **The crossover is for a 640x640 detector on this GPU.** The *shape* of the
   argument generalises — a fixed cost divided by a growing denominator — but the
   2.30 ms number is this pipeline on this card.
-- **It stops at 3.9 ms.** Everything above that, where the crossover conclusions
-  would bite hardest, is extrapolation. See [Roadmap](roadmap.md).
+- **The A2 ladder stops at 3.9 ms.** Heavier models, up to an 82.6 ms SAM ViT-H,
+  are measured at engine level on [Across architectures](model-zoo.md), because A2
+  cannot carry them; the B1 crossover above is placed on that engine-level sweep,
+  not measured through B1.
 
 ---
 

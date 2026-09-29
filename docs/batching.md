@@ -2,8 +2,18 @@
 
 [← index](../README.md) · prev: [Across architectures](model-zoo.md) · next: [Live traffic (B3)](live-batching.md)
 
-Dynamic batching is where Triton either wins the whole study or loses to a
-200-line C++ program. Which one depends entirely on the client.
+Dynamic batching is where Triton either ties a batched C++ loop or loses to its
+own naive clients by 7-8×. Which one depends entirely on the client — and on
+whether the C++ side batches too
+([correction](#correction-the-throughput-lead-is-batching-not-triton)).
+
+!!! note "Capacity mode throughout"
+
+    Every latency on this page is **capacity mode**: a closed-loop client holding
+    8 frames in flight per stream. It measures throughput, not what a live camera
+    waits. With one frame in flight per camera, D's 5 ms window costs ~5.5 ms per
+    frame at low load (1–8 cameras) and a 0 µs window ~0.5 ms —
+    [live traffic (B3)](live-batching.md).
 
 ---
 
@@ -41,11 +51,11 @@ there are 8N outstanding. Little's law then fixes the latency:
 > latency ≈ in-flight ÷ throughput
 
 That last column is `8N / fps`, computed with no reference to the measurement,
-and it tracks the observed p50 across a **12x range** — consistently 10-15%
-high, which is the right sign for a p50 against a mean-based law.
+and it tracks the observed p50 across a **12x range** — always above it, by
+7-26%, which is the right sign for a p50 against a mean-based law.
 
-So D's latency is a property of **how many requests the client chooses to keep in
-flight**, not of the batching window. Halve `DEPTH` and the latency roughly
+So in capacity mode D's latency is a property of **how many requests the client
+chooses to keep in flight**, not of the batching window. Halve `DEPTH` and the latency roughly
 halves; throughput falls too, because the batches have less to draw on. The
 README's second lesson — *D's 1665 fps and its 74 ms are the same number read two
 ways* — turns out to be literally true, as a ratio, and for a different reason
@@ -53,14 +63,23 @@ than the one originally given.
 
 ### What this does not change
 
-The **advice is unaffected**. D really does answer in 6-74 ms, that really is too
-slow for a control loop, and the throughput really is the highest measured. Only
-the *mechanism* was mislabelled: the cost is pipelining depth, not queue time.
+The **capacity-mode reading is unaffected**: with eight frames in flight per
+stream, D answers in 6-74 ms. Only the *mechanism* was mislabelled: the cost is
+pipelining depth, not queue time.
 
-It does change one practical thing. If D's latency is what rules it out for you,
-the lever is **`DEPTH`**, which is a client constant, not
+It does change one practical thing. If D's capacity-mode latency is what rules it
+out for you, the lever is **`DEPTH`**, which is a client constant, not
 `max_queue_delay_microseconds`, which is where you would naturally reach first
 and which [the knob sweep](#the-batching-knobs-swept) already showed barely moves anything.
+
+**A live camera is a different regime** *(corrected 2026-09-29)*. It has one frame
+in flight, so there is no client queue; what remains is the window plus the batch-8 engine running small batches:
+D's 5 ms setting adds ~5.5 ms per frame at low load, a 0 µs window ~0.5 ms
+([live traffic](live-batching.md)). This page first called 6-74 ms "too slow for a
+control loop" and D's throughput "the highest measured"; the first is not what a
+live camera sees, and the second was retracted
+([single model](#correction-the-throughput-lead-is-batching-not-triton),
+[three models](#the-multi-model-lead-reverses)).
 
 ### One number that does not fit
 
@@ -133,33 +152,48 @@ synchronous clients sent one request, blocked, read the answer, then sent the
 next. Requests trickled in one at a time, the 5 ms batching window expired empty,
 and every request paid the window's latency while riding alone.
 
-> **Dynamic batching requires async in-flight clients.** A sync client pays for
-> the batching window and never collects the benefit.
+> **Dynamic batching needs requests that arrive together.** One synchronous client
+> pays for the window and never collects the benefit; many synchronous cameras do
+> collect it once load is high ([live traffic](live-batching.md)). *(Corrected
+> 2026-09-28; this box first said batching requires async in-flight clients.)*
 
 The fix: an **async client with eight requests in flight** per stream. Requests
-co-arrive, batches fill, and the same server delivers **1665 fps — the highest
-number in the entire study**. It was first written up as "the only configuration
+co-arrive, batches fill, and the same server delivers **1665 fps on yolov8s in
+capacity mode** — first reported as the highest number in the study, which it is
+not (D reaches 1,816 fps on three models, and a batched in-process loop 2,280;
+see below). It was first written up as "the only configuration
 that beats in-process C++"; that compared it with C++ at batch 1, and C++ given the
 same batch-8 engine ties it
 ([correction below](#correction-the-throughput-lead-is-batching-not-triton)).
 
 ## The bill, in the latency column
 
-Those 1665 frames each took 6–74 ms from submission to answer
-(**not** all of it queue wait — see
-[where D's latency actually goes](#where-ds-latency-actually-goes)):
+In capacity mode D's frames took 6–74 ms from submission to answer (1,041–1,665
+fps) — **not** all of it queue wait, see
+[where D's latency actually goes](#where-ds-latency-actually-goes):
 
-| Concurrency | Total fps | Queue wait (p50) | GPU service/frame |
+| Concurrency | Total fps | Client latency p50 (8 in flight/stream) | Engine floor/frame · batch formed |
 |---|---|---|---|
-| 1 | 1041 | 6.2 ms | 0.61 ms |
-| 2 | 1136 | 11.1 ms | 0.61 ms |
-| 4 | 1378 | 19.2 ms | 0.61 ms |
-| 8 | 1640 | 36.6 ms | 0.61 ms |
-| 16 | 1665 | 73.9 ms | 0.61 ms |
+| 1 | 1041 | 6.2 ms | 0.61 ms · batch 4.00 |
+| 2 | 1136 | 11.1 ms | 0.61 ms · batch 4.00 |
+| 4 | 1378 | 19.2 ms | 0.61 ms · batch 4.00 |
+| 8 | 1640 | 36.6 ms | 0.61 ms · batch 7.97 |
+| 16 | 1665 | 73.9 ms | 0.61 ms · batch 6.68 |
 
-**Batching converts latency into throughput.** For offline analytics that is the
-best trade in the study. For a live camera with a 33 ms frame budget, it is a bus
-that misses its stop — at conc=16 a frame waits more than two full camera frames.
+*0.61 ms is the `trtexec` batch-8 floor, not a measurement; below concurrency 8 D
+forms batches of 4, whose per-frame cost is higher (~0.77 ms at concurrency 1) —
+[batch size formed](#what-batch-size-does-d-actually-form), a separate run. Later
+sessions put concurrency 16 at 1,524–1,650 fps rather than 1,665
+([one measurement that was not reproducible](#one-measurement-that-was-not-reproducible),
+[correction](#correction-the-throughput-lead-is-batching-not-triton)).*
+
+**Batching converts latency into throughput** in capacity mode, and for offline
+analytics that is a good trade. It does not describe a live camera
+*(corrected 2026-09-29; this paragraph first said a frame waits "more than two full
+camera frames")*. With one frame in flight per camera there is no client queue:
+D's configuration measured 7.3–8.4 ms p50 at 1–8 live cameras and 8.95 ms at 48,
+and a 0 µs window costs ~0.5 ms over no batching
+([live traffic](live-batching.md)).
 
 ## Triton at its absolute best
 
@@ -171,9 +205,9 @@ hand-rolled equivalent"; a hand-rolled equivalent was later built, and it wins
 
 | Scenario | Total fps | Latency p50 | vs hand-rolled best |
 |---|---|---|---|
-| D: 1 model (yolov8s), conc=16 | 1665 | 73.9 ms wait | +38% vs A2 at batch 1 (1205); **ties A2 at batch 8** ([correction](#correction-the-throughput-lead-is-batching-not-triton)) |
-| **D: 3 models × 6 streams each** | **1799** | 29.4 ms | +49% vs A2 on yolov8s alone at batch 1; **−22% vs A2 on the same three models at batch 8** ([correction](#the-multi-model-lead-reverses)) |
-| **D: 3 models × 6 streams (conc=18)** | **1816** | 58.6 ms | +51% vs A2 on yolov8s alone at batch 1; see the same correction |
+| D: 1 model (yolov8s), conc=16 | 1665 | 73.9 ms (client, 8 in flight) | +38% vs the best batch-1 C++ (A1, 1205 at 16 streams; A2 peaks at 1219); **ties A2 at batch 8** ([correction](#correction-the-throughput-lead-is-batching-not-triton)) |
+| **D: 3 models × 6 streams each** | **1799** | 29.4 ms | +49% vs best batch-1 C++ on yolov8s alone; **−21 to −22% vs A2 on the same three models at batch 8** ([correction](#the-multi-model-lead-reverses)) |
+| **D: 3 models × 6 streams (conc=18)** | **1816** | 58.6 ms | +51% vs best batch-1 C++ on yolov8s alone; see the same correction |
 | D: yolov8n alone, conc=8 | 1988 | 24.1 ms | engine cap 2960 effective |
 
 ### Correction: the throughput lead is batching, not Triton
@@ -239,7 +273,7 @@ one model and beats it on three, at a fraction of its latency
 ([single model](#correction-the-throughput-lead-is-batching-not-triton),
 [three models](#the-multi-model-lead-reverses)). The ~50% first reported here
 compared it with C++ at batch 1 on one model. The same server with naive clients
-(C1: 225 fps) still loses by 8×.
+(C1: 225 fps) still loses by 7-8×.
 
 Triton's case is operational, not speed: one server for many clients and processes,
 model reloads without restarts, metrics, and a standard protocol. Those are real,
@@ -264,6 +298,12 @@ See [`triton/models/yolov8s_dyn/config.pbtxt`](../triton/models/yolov8s_dyn/conf
 `max_queue_delay_microseconds` is the bus timetable: how long a partly-full batch
 waits for stragglers.
 
+Leaving the `dynamic_batching` block out does **not** disable batching: Triton
+auto-completes a 0 µs dynamic batcher (preferred `[8]`) for any model with
+`max_batch_size > 0` that names no scheduler
+([measured](live-batching.md#5-triton-turns-batching-on-even-when-you-dont-ask)).
+Use `max_batch_size: 0` or `--disable-auto-complete-config` to turn it off.
+
 ## The batching knobs, swept
 
 Those values were fixed throughout the study and never justified. Swept with flow
@@ -279,13 +319,19 @@ D against `yolov8s_dyn`, 2–3 repeats per cell
 | 4, 8 | 20000 | 1025.3 | 6.29 ms | 1600.1 | 36.85 ms |
 | 8 | 5000 | **1085.9** | 6.77 ms | 1605.1 | 37.09 ms |
 
-**The study's `[4,8] / 5000 µs` is the right default** — best or joint-best at both
-concurrencies. Not merely inherited, as it turns out.
+**For D's async client in capacity mode, the study's `[4,8] / 5000 µs` is the right
+default** — best or joint-best at both concurrencies. Not merely inherited, as it
+turns out. **For live cameras it is not** *(corrected 2026-09-29)*: there the best
+window grows with load — 0 µs up to 16 cameras, 500 µs at 32, 5 ms only at 48 — and
+up to 16 cameras the 5 ms window is the costliest setting measured
+([live traffic](live-batching.md#4-the-right-window-grows-with-load)).
 
-**At saturation the knobs barely matter.** At concurrency 8 the whole sweep spans
-1588–1630 fps, a **2.7%** spread. At concurrency 1 it spans 847–1086, a **28%**
-spread. Batching configuration is a low-concurrency concern; once requests arrive
-fast enough, the settings stop mattering.
+**At saturation the knobs barely matter** (capacity mode, throughput). At
+concurrency 8 the whole sweep spans 1588–1630 fps, a **2.7%** spread. At
+concurrency 1 it spans 847–1086, a **28%** spread. In capacity mode, batching
+configuration is a low-concurrency concern; once requests arrive fast enough, the
+settings stop mattering. Under live traffic the window still moves latency at high
+load (48 cameras: 8.95 ms p50 at 5 ms against 13.0 ms at 0 µs).
 
 ### Shortening the window makes latency *worse*
 
@@ -306,6 +352,11 @@ fill, forcing more small GPU passes.
 > untouched, so the 6.2 ms is round-trip and batch-formation dynamics, not the
 > timer. The knob to reach for when tuning D is the client's in-flight depth, not
 > `max_queue_delay_microseconds`.
+>
+> That holds for D's 8-deep async client. For live cameras, one frame in flight
+> each, shortening the window is exactly what cuts latency: 5,000 → 0 µs takes the
+> batching cost from ~5.5 ms to ~0.5 ms per frame at low load
+> ([live traffic](live-batching.md)).
 
 `preferred_batch_size` matters less, and in the expected direction: `[2,4]`
 under-uses a batch-8 engine (−15% at conc=1), while a bare `[8]` maximises

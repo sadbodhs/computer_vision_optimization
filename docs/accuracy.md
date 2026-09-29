@@ -21,7 +21,7 @@ Raw data: [`results/v3/accuracy.tsv`](../results/v3/accuracy.tsv).
 |---|---|---|---|---|---|
 | ultralytics reference | PyTorch FP32 | linear | **0.47376** | 0.64535 | — |
 | study chain | TensorRT FP16 | linear | **0.47348** | 0.64524 | **−0.00028 (−0.06%)** |
-| **study chain as shipped** | TensorRT FP16 | **nearest** | 0.46782 | 0.63582 | **−0.00594 (−1.25%)** |
+| **study chain as first shipped** | TensorRT FP16 | **nearest** | 0.46782 | 0.63582 | **−0.00594 (−1.25%)** |
 
 ## 1. The chain is sound — the custom code costs essentially nothing
 
@@ -36,9 +36,9 @@ reference**. That single number validates a lot at once:
 That is the reassurance the whole benchmark rested on but never demonstrated. It
 is now demonstrated rather than assumed.
 
-## 2. …but as shipped, every flow leaves ~0.6 mAP on the table
+## 2. …but as first shipped, every flow left ~0.6 mAP on the table
 
-The pipeline does **not** use linear resize. It uses nearest-neighbour, and not
+The pipeline did **not** use linear resize. It used nearest-neighbour, and not
 only in the Python client — the fused CUDA kernel does too:
 
 ```c
@@ -53,7 +53,8 @@ applies to **A2, B2, C2 and D alike** — the entire study.
 The cost is **−0.0059 mAP50-95 (−1.25%)** and **−0.0095 mAP50** against the
 reference, for a preprocessing shortcut that buys a handful of memory loads in a
 kernel that is not the bottleneck ([stage decomposition](stage-decomposition.md)
-puts preprocessing at 0.15 ms against a 0.97 ms engine).
+puts preprocessing at 0.15 ms against a 0.97 ms engine; ~0.19 ms measured below in
+RTSP mode).
 
 > **This is the finding that justifies having an accuracy axis at all.** No amount
 > of throughput measurement could surface it: every flow was *equally* wrong, so
@@ -98,7 +99,7 @@ recovery**. At 30 fps it is 0.03% of the 33.3 ms budget.
 
 ## 4. Every scenario, not just YOLOv8s
 
-The result above was one model. Repeated across all three architectures and both
+The result above was one model. Repeated across all three YOLO models and both
 engine shapes (batch-1 and the batch-8 `_dyn` engines flow D uses), same 500
 images, same thresholds:
 
@@ -124,19 +125,21 @@ That trade, and why it beats downgrading the model, is in
 
 **Two things fall out.**
 
-**The chain is validated for every architecture, not just the one.** All three land
+**The chain is validated for every model tested, not just the one.** All three land
 within ±0.16% of their PyTorch reference, and the deltas scatter in both
 directions — which is what noise looks like, rather than a systematic loss.
 
 **Dynamic batching is free on the accuracy axis.** The batch-8 engines match their
-batch-1 counterparts within ±0.26%, again scattering both ways. So
-[flow D](batching.md)'s throughput win costs queue latency and *nothing else* —
+batch-1 counterparts within ±0.26%, again scattering both ways. So batching's
+throughput gain — the batch-8 engine is 37% cheaper per frame, whoever drives it
+([batching](batching.md#correction-the-throughput-lead-is-batching-not-triton)) —
+costs some latency and *nothing else* —
 worth knowing, because "does batching change my detections?" is a reasonable thing
 to suspect and the answer here is no.
 
 ## 5. Speed and accuracy together, per model
 
-The study compares the three models on throughput alone, which is only half the
+The study's YOLO fps tables compare these three models on throughput alone, which is only half the
 picture. With the accuracy axis, the actual trade:
 
 | Model | `trtexec` batch-1 | mAP50-95 | vs YOLOv8n |
@@ -165,12 +168,12 @@ the column those tables were missing.
 
 ## What this unblocks
 
-INT8 now has somewhere to report to. [Precision](precision.md) established a
-**+33.6% throughput ceiling** for INT8 but deliberately refused to call it a
-result, because an uncalibrated engine's detections are meaningless. With this
-harness in place, a calibrated INT8 engine can be scored on the same 500 images
-against the same reference, turning that ceiling into an actual
-speed-versus-accuracy trade.
+INT8 had somewhere to report to. [Precision](precision.md) first established a
+**+33.6% throughput ceiling** for uncalibrated INT8 and deliberately refused to call
+it a result, because an uncalibrated engine's detections are meaningless. Scored
+with this harness on the same 500 images, the calibrated engine keeps **+32.8%** for
+**−1.55 mAP points** — the ceiling turned into an actual speed-versus-accuracy trade
+([precision](precision.md#calibrated-int8-the-actual-result)).
 
 ---
 

@@ -29,8 +29,8 @@ C2	2	736	2.20
 C2	4	986	3.15
 C2	8	1037	6.86
 C2	16	1038	14.5
-D	1	1041	6.2	latency is batch queue wait; GPU service 0.61 ms
-D	2	1136	11.1	latency is batch queue wait; GPU service 0.61 ms
-D	4	1378	19.2	latency is batch queue wait; GPU service 0.61 ms
-D	8	1640	36.6	latency is batch queue wait; GPU service 0.61 ms
-D	16	1665	73.9	latency is batch queue wait; GPU service 0.61 ms
+D	1	1041	6.2	latency is client round trip with 8 in flight per stream, mostly client queue (docs/batching.md); 0.61 ms is the batch-8 engine floor, not measured
+D	2	1136	11.1	latency is client round trip with 8 in flight per stream, mostly client queue (docs/batching.md); 0.61 ms is the batch-8 engine floor, not measured
+D	4	1378	19.2	latency is client round trip with 8 in flight per stream, mostly client queue (docs/batching.md); 0.61 ms is the batch-8 engine floor, not measured
+D	8	1640	36.6	latency is client round trip with 8 in flight per stream, mostly client queue (docs/batching.md); 0.61 ms is the batch-8 engine floor, not measured
+D	16	1665	73.9	latency is client round trip with 8 in flight per stream, mostly client queue (docs/batching.md); 0.61 ms is the batch-8 engine floor, not measured

@@ -2,11 +2,11 @@
 
 [← index](../README.md) · prev: [Batching](batching.md) · next: [Triton tuning](triton-tuning.md)
 
-Every latency this study published for batching comes from **capacity mode**: a
-closed-loop client holding 8 frames in flight per stream. That is the right way to
-measure throughput, and it makes latency a queue the client builds itself (see
-[batching](batching.md)). A live camera has **at most one frame in flight**, and
-nobody had measured what batching does to it.
+Until this page, every latency this study published for batching came from
+**capacity mode**: a closed-loop client holding 8 frames in flight per stream. That
+is the right way to measure throughput, and it makes latency a queue the client
+builds itself (see [batching](batching.md)). A live camera has **at most one frame
+in flight**, and nobody had measured what batching does to it.
 
 This page does, with a new flow and a new measurement mode.
 
@@ -20,9 +20,11 @@ run.
 !!! abstract "The short version"
 
     - **Below capacity, batching never makes a frame faster — only slower.** D's
-      configuration adds **~5.5 ms** to every live frame. B3 · 0 µs adds **~0.5 ms**
-      (B3 · 500 µs ~1 ms). B2 (no batching) is still the fastest by that margin.
-    - **In a burst, batching bounds the tail** — up to 24% lower p99.
+      configuration adds **~5.5 ms** to every live frame at 1–8 cameras. B3 · 0 µs adds **~0.5 ms**
+      (B3 · 500 µs ~1 ms). B2 (no batching) is the fastest Triton config by that
+      margin; A2, in-process, is faster again (last point).
+    - **In a burst, batching bounds the tail** — batching cuts p99 13–26% in
+      synchronised bursts (B3 13–24%, D config up to 26%).
     - **Past B2's capacity, batching is the difference between working and not**
       — at 48 cameras B2's median frame is **2.1 seconds** late; every batching
       config stays at **9–13 ms**.
@@ -55,7 +57,8 @@ the same phases for every config) and **synchronised** (all cameras fire togethe
 | **B3 · 500 µs** | `yolov8s_dyn` | preferred `[2, 4, 8]`, **500 µs** | batch only frames that arrive close together |
 | **B3 · 0 µs** | `yolov8s_dyn` | **0 µs**, no preferred sizes | batch only when both instances are busy |
 
-All four use CUDA shared memory and 2 Triton instances. **B3** is B2's client
+All four use CUDA shared memory and 2 Triton instances. A fifth arm, meant as
+"batching off", turned out to be a second run of the 0 µs config (§5). **B3** is B2's client
 pointed at a short-window batcher: batching happens only when frames are already
 waiting together, and no frame is held back to be batched.
 
@@ -79,29 +82,30 @@ Every batching config is slower than B2, and the gap splits cleanly into two par
   every config forms batches of exactly 1.00. TensorRT tunes kernels for the
   engine's optimisation shape (batch 8); batch 1 runs on them correctly but less
   efficiently.
-- **The rest is the window.** 500 µs costs ~0.5 ms; D's 5,000 µs costs ~5 ms. A
-  frame arriving alone cannot form a preferred batch, so it waits out the whole
-  window before it is sent.
+- **The rest is the window.** 500 µs costs ~0.5 ms; D's 5,000 µs costs ~5 ms at
+  1–8 cameras. A frame arriving alone cannot form a preferred batch, so it waits
+  out the whole window before it is sent.
 
-So D's configuration charges every live frame **5.4–5.9 ms** for batches that, at
-these loads, barely form. B3 · 0 µs cuts that to **0.4–0.6 ms**, nearly all of
+So at 1–8 cameras D's configuration charges every live frame **5.4–5.9 ms** (3.7 ms
+at 16, as batches begin to form) for batches that, at these loads, barely form. B3 · 0 µs cuts that to **0.4–0.6 ms**, nearly all of
 which is the engine.
 
 ## 2. In a burst, batching bounds the tail
 
 Synchronised cameras — every frame lands at once:
 
-| Cameras | B2 p99 | B3 · 0 µs p99 | B3 · 500 µs p99 | B2 mean | B3 · 500 µs mean |
-|---:|---:|---:|---:|---:|---:|
-| 8 | 9.66 | **8.11** | 8.21 | **6.81** | 7.10 |
-| 16 | 15.39 | **13.00** | 13.44 | **9.85** | 10.51 |
-| 32 | 29.26 | 22.26 | **22.21** | 17.53 | **15.99** |
+| Cameras | B2 p99 | B3 · 0 µs p99 | B3 · 500 µs p99 | D config p99 | B2 mean | B3 · 500 µs mean | D config mean |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 8 | 9.66 | 8.11 | 8.21 | **7.43** | **6.81** | 7.10 | 6.93 |
+| 16 | 15.39 | 13.00 | 13.44 | **12.79** | **9.85** | 10.51 | 10.05 |
+| 32 | 29.26 | 22.26 | 22.21 | **21.70** | 17.53 | 15.99 | **15.60** |
 
 With B2, a burst of N frames queues behind two instances and the last frame waits
 for all the others. Batching sends the burst as a few batches, so the worst frame
-finishes sooner — **p99 falls 13–24%**. The price is paid in the mean at 8 and 16
-cameras, where every frame in a batch waits for the whole batch; by 32 cameras
-batching wins both.
+finishes sooner — **batching cuts p99 13–26% in synchronised bursts (B3 13–24%,
+D config up to 26%)**. The price is paid in the mean at 8 and 16 cameras, where
+every frame in a batch waits for the whole batch; by 32 cameras batching wins both.
+*(D config column added 2026-09-29; §6 already named it the burst winner.)*
 
 Note how close B2's burst p99 at 32 cameras (29.3 ms) comes to one frame interval
 (33.3 ms). Batching keeps a synchronised rig well inside it.
@@ -116,19 +120,22 @@ Unsynchronised cameras:
 | **48 (1,440)** | **2,124** | **3,879** | **8.95–13.04** | **12.59–17.76** |
 | 56 (1,680) | 3,357 | 6,121 | 84–94 | 146–157 |
 
-48 cameras sits between B2's capacity (~1,131 fps) and D's (~1,650 fps). B2 cannot
-keep up, so its queue grows for the whole run and frames arrive **seconds** late.
+48 cameras sits between B2's capacity (~1,100 fps delivered here; 1,131 in
+capacity mode) and the batching configs' (~1,660 fps). B2 cannot keep up, so its queue grows for the whole run and frames arrive **seconds** late.
 Batching raises capacity enough to stay on the flat part of the curve. At 56
 cameras (1,680 fps) every config is past capacity and degrades — batching only
 moves the wall, it does not remove it.
 
 ## 4. The right window grows with load
 
-| Load | Best config (p50) | Mean batch formed |
+| Load | Best batching window (p50) | Mean batch formed |
 |---|---|---|
 | ≤ 16 cameras | **B3 · 0 µs** | ~1.0 — nothing to batch; any wait is pure cost |
 | 32 cameras | **B3 · 500 µs** (4.97 ms, vs 6.15 at 0 µs) | 1.45 vs 1.27 — the window catches enough batch-mates to pay for itself |
 | 48 cameras | **D config** (8.95 ms, vs 13.0 for B3) | 4.01 vs ~3.5 — bigger batches are more GPU-efficient, and near capacity efficiency *is* latency |
+
+*Among batching configs only. Up to 32 cameras B2 has a lower p50 than any of
+them (4.35 ms at 32), and A2 lower still — see [§6](#6-choosing-a2-b2-or-b3-at-each-load).*
 
 A window is a bet that company is coming. At low load it rarely is, and the wait
 is wasted; near capacity it always is, and the larger batches free enough GPU time
@@ -174,7 +181,7 @@ that in burst cells are treated as ties below.
 
 | Traffic | Cameras (load) | Lowest turnaround | GPU busy (3090) | If you need a server |
 |---|---|---|---|---|
-| Unsynchronised | 1–16 (≤ 480 fps) | **A2** — 1.48–1.63 ms p50, 0.3–0.9 ms ahead of B2 | 4–46% | **B2** (B3 · 0 µs +0.3–0.6 ms p99) |
+| Unsynchronised | 1–16 (≤ 480 fps) | **A2** — 1.48–1.63 ms p50, 0.3–0.9 ms ahead of B2 | 4–46% | **B2** (B3 · 0 µs +0.3–0.8 ms p99) |
 | Unsynchronised | 32 (960 fps) | **A2** — 2.07 ms p50, 4.27 p99; half of B2's 4.35 p50 | 77% | **B3 · 500 µs** — 7.06 ms p99 |
 | Unsynchronised | 48 (1,440 fps) | **D config** — 8.95 ms p50, 12.59 p99. A2 (827 ms) and B2 (2,124 ms) are past capacity | 100% | D config |
 | Synchronised | 1–4 | **A2** | 4–14% | B2 (1 camera) · B3 · 500 µs (4) |
@@ -199,7 +206,11 @@ identical jobs arriving together, first-come-first-served gives a better average
 than sharing — Triton's instance count is quietly acting as admission control.
 
 **Capacities under live traffic:** A2 delivers ~1,290 fps before its queue grows
-without bound, B2 ~1,130, and the batching configs ~1,650.
+without bound, B2 ~1,100, and the batching configs ~1,660 (the fps each delivered
+at 48–56 cameras). B2's figure is a little below its capacity-mode 1,131; A2's is
+*above* its capacity-mode best of 1,219 fps ([results](results.md#capacity-results)),
+which only went up to 16 streams. Why A2 gets more out of 48 paced cameras than 16
+closed-loop streams was not measured and is not explained.
 
 !!! warning "Correction: the A2–B2 latency gap was mis-measured"
 
@@ -241,18 +252,20 @@ different GPU — see [on another GPU](other-gpus.md).
   `nvidia-smi` reports that *some* kernel was running, not that there was no capacity
   left.
 - **The 3090's wall is partly a power wall.** The SM clock sits at 1,695 MHz up to 8
-  cameras, boosts to ~1,950 MHz at 16–32, and falls back to ~1,760–1,880 MHz at 48
+  cameras, boosts to ~1,880–1,950 MHz at 16–32, and falls back to ~1,760–1,880 MHz at 48
   cameras, where the card draws ~348 W against its 350 W limit.
-- **One camera is slower than four — but only on the Triton paths** (B2 2.47 vs
-  2.06 ms, B3 · 0 µs 3.04 vs 2.73), not in A2 (1.64 vs 1.70), and at the same
-  1,695 MHz clock either way. So it is not the GPU: it looks like a wake-up cost on the
+- **One camera is slower than four — clearly so only on the Triton paths.** In
+  the main sweep (§1, 3 repeats) B2 is 2.50 vs 1.91 ms and B3 · 0 µs 3.10 vs
+  2.49, about +0.6 ms; A2 moves by 0.05 ms (1.63 vs 1.58), within run-to-run
+  spread, and in this utilisation run it went the other way (1.64 vs 1.70). That run
+  shows the same 1,695 MHz clock at both loads. So it is not the GPU: it looks like a wake-up cost on the
   gRPC and server side when requests are sparse.
 
 ## Predictions, stated in advance
 
 | # | Prediction | Result |
 |---|---|---|
-| 1 | Low load: B3 within ~0.5 ms of B2; D config ~4–5 ms worse | **Partly wrong.** B3 · 0 µs +0.4–0.6 ms ✓; D config +5.4–5.9 ms ✓ (slightly more). B3 · 500 µs +0.9–1.2 ms ✗ — the prediction left out the batch-8 engine's own ~0.6 ms |
+| 1 | Low load: B3 within ~0.5 ms of B2; D config ~4–5 ms worse | **Partly wrong.** B3 · 0 µs +0.4–0.6 ms ✓; D config +5.4–5.9 ms at 1–8 cameras (+3.7 at 16) ✓ (slightly more). B3 · 500 µs +0.9–1.2 ms ✗ — the prediction left out the batch-8 engine's own ~0.6 ms |
 | 2 | Bursts: batching bounds p99, B2 keeps the better mean | ✓ at 8 and 16 cameras; at 32 batching wins both |
 | 3 | 48 cameras: B2 unbounded, batching bounded | ✓ 2.1 s against ≤ 13 ms |
 | 4 | B3 · 0 µs batches ~1.0 at low load, rising with load | ✓ 1.00 → 1.01 → 1.27 → 3.57 → 7.98 |
@@ -264,16 +277,16 @@ batching unasked (§5).
 
 | Situation | Use | Why |
 |---|---|---|
-| Few cameras, well below capacity, latency is everything | **B2** | ~0.5 ms faster than anything that batches |
-| Bursts possible, or load may approach B2's ~1,131 fps | **B3 · 0 µs** | +0.5 ms at low load buys a bounded tail in bursts and survival past B2's capacity |
+| Few cameras, well below capacity, latency is everything | **A2** (or **B2** if you need a server) | A2 is 0.3–0.9 ms ahead of B2; B2 ~0.5 ms ahead of anything that batches (§6) |
+| Bursts possible, or load may approach B2's ~1,100 fps | **B3 · 0 µs** | +0.5 ms at low load buys a bounded tail in bursts and survival past B2's capacity. D config's burst p99 is 0.2–0.7 ms lower still, but it costs ~5.5 ms on every unsynchronised frame at low load; B3 · 0 µs is the all-rounder |
 | Sustained load near capacity | **longer window** (D's config) | bigger batches free GPU time; best p50 at 48 cameras |
-| Live cameras at low load | **never D's config** | +5.5 ms on every frame for batches that do not form |
+| Live cameras at low load | **never D's config** | +5.4–5.9 ms on every frame (1–8 cameras) for batches that barely form |
 
-The earlier [use-cases](use-cases.md) advice — *"No batching, ever"* for closed
-loops, justified by D's 74 ms — survives in its conclusion and loses its reason.
-The real cost of batching a live camera below capacity is **~0.5 ms, not 74 ms**,
-and B3 · 0 µs is cheap enough to be worth it wherever a burst or a load spike is
-possible.
+[Use cases](use-cases.md) first said *"No batching, ever"* for closed loops,
+justified by D's 74 ms; it has since been updated with this page's result. The real
+cost of batching a live camera at low load is **~0.5 ms, not 74 ms**, so B3 · 0 µs
+is cheap insurance wherever a burst or a load spike is possible — and for a closed
+loop, A2 remains the first choice.
 
 ## Three harness defects this run exposed
 

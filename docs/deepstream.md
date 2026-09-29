@@ -29,6 +29,12 @@ aspect-ratio, symmetric padding) + the marcoslucianops YOLO parser.
 | **E1 (DeepStream)** | **1.50 ms** | **45** |
 | C2 (Python numpy) | ~2-8 ms | ~8-20 |
 
+*Single-stream RTSP runs ([`comparison_tables.md`](../results/comparison_tables.md)),
+not timed on one shared clock, so read this as "same league", not a ranking. On one shared clock
+([paced mode](live-batching.md), not run for DeepStream) A2 takes 1.48–1.63 ms and
+B2 1.91–2.50 ms at 1–16 cameras. The fps column is what each run's source
+delivered, not a pipeline limit.*
+
 E1 sits between A2 and B2 — all in the same league. DeepStream has no RPC at all
 and its batch window is negligible at batch=1.
 
@@ -51,10 +57,15 @@ batch-assembly wait — a batch of 8 fills every ~33 ms when sources arrive at
 | | DeepStream `nvstreammux` | Triton dynamic batching |
 |---|---|---|
 | Batch fills when | sources tick (fixed rate) | client requests arrive |
-| Wait is | deterministic (~33 ms at 30 fps) | depends on client in-flight pattern |
+| Wait is | deterministic (~33 ms at 30 fps, as configured here) | capped by the window: ≤ 5 ms with D's settings, 0 with B3 · 0 µs |
 
-Same trade as [flow D](batching.md), reached by a different road: E2's 33 ms is the
-frame interval; D's 6–74 ms is the queue.
+The fair comparison is the same traffic: 30 fps sources, one frame in flight each.
+There E2 waits ~33 ms for a batch of 8 to assemble, while Triton's dynamic batcher
+adds ~5.5 ms with D's 5 ms window and ~0.5 ms with a zero window, because it sends
+whatever has arrived rather than waiting for every source
+([live traffic](live-batching.md)). D's 6–74 ms is a different thing: in capacity
+mode, its client's own eight-frames-in-flight queue
+([batching](batching.md#where-ds-latency-actually-goes)).
 
 ## Capacity mode: attempted, and it measures the harness
 
@@ -100,8 +111,8 @@ pre-allocated NVMM buffers rather than sysmem ones, or using a buffer pool so
 there is no per-frame `memcpy` and no format conversion. That is a real change to
 `ds_bench`, not a parameter.
 
-**What can be said:** at a single stream with a fixed batch-1 engine, E2 sustains
-**653 fps** in capacity mode against a source-bound 45 fps — so the source, not
+**What can be said:** at a single stream with a fixed batch-1 engine, DeepStream
+sustains **653 fps** in capacity mode against a source-bound 45 fps — so the source, not
 DeepStream, was the limit in the [E1/E2 tables above](#e2-multi-stream-batched).
 That much the exercise did establish. See [roadmap](roadmap.md).
 

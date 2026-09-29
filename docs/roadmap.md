@@ -1,19 +1,21 @@
-# Roadmap — what this study does *not* cover
+# Roadmap — what is measured, and what is still open
 
 [← index](../README.md) · prev: [Decoder capacity](nvdec.md)
 
 This study measures one axis thoroughly: **the serving and transport layer**, at
-FP16, at 640×640, for YOLO detection on one GPU. Below is what it deliberately
-does not answer yet.
+640×640 on one GPU — mostly YOLO detection at FP16, with a model-cost ladder, a
+22-model sweep and calibrated INT8 alongside. Below is what started out as the list
+of what it did not answer, and where each item stands now.
 
-**Nothing on this page has been measured.** No numbers are claimed. Each entry
-states the lever, why it matters *for the numbers already published here*, and how
-it would be tested. Hardware support is verified against the actual rig
-(RTX 3090, compute 8.6, TensorRT 10.7).
+Entries marked **measured** link to their result and list what is still open;
+everything else is unmeasured and claims no numbers. Each open entry states the
+lever, why it matters *for the numbers already published here*, and how it would be
+tested. Hardware support is verified against the actual rig (RTX 3090, compute 8.6,
+TensorRT 10.7).
 
 ---
 
-## Tier 1 — the missing axis
+## Tier 1 — the accuracy axis
 
 ### Accuracy (mAP) - measured
 
@@ -47,6 +49,9 @@ Building it needed a two-stage route, because ultralytics pip-installs its own
 TensorRT and engines are locked to the exact build that made them: let ultralytics
 calibrate, keep its portable calibration cache, then rebuild with the container's
 own trtexec. `scripts/build_int8_engine.py` does both.
+
+**Still open:** INT8 through the flows — only `trtexec` engine throughput was
+measured; no A2/B2/D run used the INT8 engine.
 
 ### Structured sparsity (2:4) — ✅ measured, and closed
 
@@ -87,8 +92,9 @@ contexts for MPS to multiplex.
 
 Consequences: "throughput plateaus at the engine cap" is false (A2 reaches 1259
 fps against a 1023 qps cap); Triton's contention advantage is real *only* against
-MPS-less processes and inverts once MPS is on; and MPS should **not** be enabled
-for a Triton deployment.
+MPS-less processes and inverts once MPS is on; and for a Triton deployment MPS is a
+median-vs-tail trade - +20% p50 but −38% p95 for B2 *(corrected 2026-09-29; first
+published as "MPS should not be enabled", from p50 alone)*.
 
 B2 was measured by running Triton as non-root - an MPS client must share the
 daemon's uid, and a root server cannot reach a user-owned daemon (`error 805`).
@@ -98,7 +104,7 @@ daemon's uid, and a root server cannot reach a user-owned daemon (`error 805`).
 Done: [in-graph NMS](in-graph-nms.md). Folding NMS into the engine shrinks the
 output from `[1,84,8400]` (2.82 MB) to `[1,300,6]` (7.2 KB), 392x. The engine gets
 **18.6% slower** (1023 -> 833 qps) but the raw-gRPC round trip gets **33% faster**
-(258.9 -> 344.7 fps, 3.79 -> 2.86 ms): shipping that output costs ~1.15 ms/frame,
+(258.9 -> 344.7 fps, 3.79 -> 2.82 ms): shipping that output costs ~1.2 ms/frame,
 against a ~0.22 ms engine penalty.
 
 It helps the naive paths (B1, C1/C2) and probably hurts the zero-copy ones (B2/D),
@@ -114,14 +120,23 @@ addition — +13.6% at `count: 1`, +3.1% at `count: 2`. `count: 4` + graphs fail
 graph capture and takes the server down.
 
 `preferred_batch_size` and `max_queue_delay_microseconds` swept too - see
-[batching](batching.md). `[4,8] / 5000us` is confirmed optimal, the knobs span 28%
-at concurrency 1 but only 2.7% at concurrency 8, and shortening the window makes
-latency *worse*, which corrected an earlier claim that 5ms was the floor of D's
-6.2ms latency.
+[batching](batching.md). In capacity mode (D's async client, 8 in flight per
+stream), `[4,8] / 5000us` is the best setting, the knobs span 28% at concurrency 1
+but only 2.7% at concurrency 8, and shortening the window makes latency *worse* -
+which corrected an earlier claim that 5ms was the floor of D's 6.2ms latency.
+Under live traffic the answer flips: the best window grows with load (0 µs up to 16
+cameras, 500 µs at 32, 5 ms at 48), and D's 5 ms window costs every live frame
+~5.5 ms below capacity - see
+[live traffic](live-batching.md#4-the-right-window-grows-with-load).
 
 **Still untouched:** model warmup, response cache, rate limiter, priority levels,
 and NVIDIA's Model Analyzer. Flow D's dynamic-batch engines also need
 per-batch-size graph capture (`graph_spec`), untested.
+
+Also open from the multi-model comparison: **why D falls behind** a batched
+in-process loop serving the same three models (1,780 vs 2,280 fps). Per-request
+overhead in the server and its client near 2,000 requests a second is plausible,
+not established - see [batching](batching.md#the-multi-model-lead-reverses).
 
 ### B3 — live-traffic dynamic batching — measured
 
@@ -129,7 +144,7 @@ Done: [live traffic (B3)](live-batching.md). A new paced mode — open-loop virt
 cameras, turnaround from each frame's due time — against B2, D's configuration and
 two short-window batchers. Below capacity, batching only adds latency: ~0.5 ms with
 a zero window (almost all of it the batch-8 engine), ~5.5 ms with D's 5 ms window.
-In a synchronised burst it cuts p99 13–24%. At 48 cameras, past B2's capacity, B2's
+In a synchronised burst it cuts p99 13–26% (B3 13–24%, D's settings up to 26%). At 48 cameras, past B2's capacity, B2's
 median frame is 2.1 s late while every batching config stays at 9–13 ms. The best
 window grows with load, and Triton turns batching on by itself for any model with
 `max_batch_size > 0` and no scheduler named.
@@ -188,7 +203,9 @@ layer-fusion inspection (`--dumpLayerInfo`, `--profilingVerbosity=detailed`).
 teach you to *find* an unknown bottleneck. Nsight Systems + NVTX ranges would.
 
 **System** — multi-GPU scaling, GPU clocks/power limits and thermal throttling, CPU
-affinity/NUMA. *(NVDEC capacity is now measured: [decoder capacity](nvdec.md). No session
+affinity/NUMA. *(Power was observed, not varied: the 3090's paced-mode wall is
+partly a power wall at 348 of 350 W — see
+[live traffic](live-batching.md#7-how-busy-the-gpu-was).)* *(NVDEC capacity is now measured: [decoder capacity](nvdec.md). No session
 limit; at 1080p one decoder feeds ~25 cameras, fewer than the detector can serve.)*
 
 **Multi-node orchestration (Ray)** — everything here stops at one GPU in one box.
@@ -203,12 +220,15 @@ nothing they would act on.
 The fair question is one this rig can partly answer: **Ray Data vs flow D on an
 offline corpus**. Take a fixed set of frames and measure the same engine at the same
 batch size, driven by Ray Data's batch inference versus D's async client plus
-Triton dynamic batching. Compare throughput, the GPU utilisation Ray Data sustains,
+Triton dynamic batching, and versus A2 at batch 8, which ties D offline (1,622 vs
+1,624 fps). Compare throughput, the GPU utilisation Ray Data sustains,
 and what it costs to express the job each way. The single-node result gives the
 overhead floor. The claim Ray actually makes, scaling across nodes, needs a second
 GPU box and stays open until there is one.
 
-**Deployment** — cold-start and engine load time, memory footprint per instance,
+**Deployment** — Triton's operational case, which is now its main one (model reload
+under load, metrics overhead, a shared server for many clients); cold-start and
+engine load time, memory footprint per instance,
 TRT engine portability across versions (already brushed up against: 10.7 vs 10.3
 between the Triton and DeepStream containers).
 
@@ -217,9 +237,10 @@ between the Triton and DeepStream containers).
 ## Contributing a measurement
 
 The bar for adding a number here is the same one the rest of the repo is held to:
-capacity mode where applicable, identical preprocessing, ≥3 runs, raw JSON
-committed under `results/` with a provenance note. See
-[methodology](methodology.md).
+capacity mode for throughput and paced mode for anything a live camera would feel,
+identical preprocessing, ≥3 interleaved runs, the GPU (and host) otherwise idle,
+raw data committed under `results/` with a provenance row in
+[results/README](../results/README.md). See [methodology](methodology.md).
 
 ---
 

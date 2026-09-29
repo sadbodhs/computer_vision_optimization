@@ -11,9 +11,11 @@ benchmark table, decides the pipeline.
 
 ## The one idea to take from this page
 
-Every flow here keeps up with a 30 fps camera. **A2 at 1.23 ms and D at 74 ms are
-both "fast enough" for a frame that arrives every 33.3 ms** — so throughput and
-latency numbers alone cannot choose for you.
+Below capacity, every flow here keeps up with a 30 fps camera. **Under live
+traffic at 8 cameras, A2 answers in ~1.5 ms and Triton with D's batching settings
+in ~7 ms — both "fast enough" for a frame that arrives every 33.3 ms**
+([live traffic](live-batching.md)) — so throughput and latency numbers alone
+cannot choose for you.
 
 What separates the use cases is **what the number is spent on**:
 
@@ -34,19 +36,19 @@ lowest-latency pipeline is *not* the right answer.
 | Use case | Binds on | Streams | Suggested flow | Why |
 |---|---|---|---|---|
 | **Mobile robotics** (AMR, drone, inspection bot) | closed loop | 1–4 | **A2** | in-process, no server to babysit, no network in the loop |
-| **Autonomous driving / ADAS** | closed loop | 4–12 | **A2** | as above, plus determinism — see the caveat below |
+| **Autonomous driving / ADAS** | closed loop | 4–12 | **A2** | as above, plus determinism — see the caveat below. With 8+ cameras triggered together, batching gave the lowest p99 and A2 fell behind ([measured](live-batching.md#6-choosing-a2-b2-or-b3-at-each-load)) |
 | **Pick-and-place / robot arm vision** | closed loop | 1–2 | **A2** | cycle time is the product; 1.23 ms leaves the budget to the actuator |
 | **Sports & broadcast tracking** | closed loop (soft) | 1–8 | **A2** or **B2** | live overlay must land within a frame; B2 if ops want the server |
 | **AR / assistive / interactive** | closed loop | 1–2 | **A2** | motion-to-photon is the metric, and it is unforgiving |
-| **Surveillance / VMS, site-scale** | stream density | 16–64 | **B2** | Triton ops (hot reload, metrics) + ≈A2 latency |
-| **City traffic / ANPR** | stream density | 64+ | **D** | nobody is waiting; batching buys 37% cheaper GPU per frame |
-| **Retail analytics** (footfall, queue, shelf) | stream density | 8–64 | **B2** or **D** | latency is irrelevant; pick by team, not by ms |
+| **Surveillance / VMS, site-scale** | stream density | 16–64 | **B2** up to ~32 cameras, **B3** beyond | Triton ops (hot reload, metrics). B2 tops out at ~1,100 fps under live traffic (~36 cameras); past it a short batching window keeps frames at 9–13 ms where B2's are seconds late ([measured](live-batching.md#6-choosing-a2-b2-or-b3-at-each-load)) |
+| **City traffic / ANPR** | stream density | 64+ | **B3** or **D**, on several GPUs | nobody is waiting; batching buys 37% cheaper GPU per frame — but one 3090 runs out between 48 and 56 live cameras at 30 fps, and its decoder at ~25 at 1080p ([NVDEC](nvdec.md)) |
+| **Retail analytics** (footfall, queue, shelf) | stream density | 8–64 | **B2** up to ~32 cameras, **B3** beyond | latency is irrelevant; pick by team, not by ms — but past B2's capacity only batching keeps up |
 | **Manufacturing — line inspection** | closed loop | 1–8 | **A2** | reject actuator fires downstream; a late verdict is a scrapped part. A label-free QA line (locator + anomaly model + rare open-vocabulary check) is costed in the [inspection study](https://sadbodhs.github.io/manufacturing_inspection/): ~10 cameras per 3090 at 4 parts per frame |
 | **Manufacturing — process monitoring** | stream density | 8–32 | **B2** | dashboards, not actuators |
 | **Video archive search / re-indexing** | wall clock | N/A | **A2 at batch 8** or **D** | throughput is the only axis; ~1,620 fps either way on one model — the lead was batching, not the server ([correction](batching.md#correction-the-throughput-lead-is-batching-not-triton)) |
 | **Dataset labelling / model eval** | wall clock | N/A | **A2 at batch 8** or **D** | same, and latency is meaningless offline |
-| **Multi-model production serving** | stream density | any | **D** | Triton's scheduler has no hand-rolled equivalent |
-| **Python-only team, any of the above** | engineering | any | **C2** | 1.69 ms — within 0.4 ms of C++, pure-Python client |
+| **Multi-model production serving** | stream density | any | **A2 at batch 8** (one process) or **D** | a batched in-process loop reaches 2,280 fps against Triton's 1,780 at a third of its latency ([measured](batching.md#the-multi-model-lead-reverses)); pick D for the shared server, reloads and metrics |
+| **Python-only team, any of the above** | engineering | any | **C2** | 1.69 ms — within 0.5 ms of C++, pure-Python client |
 | **Edge appliance / OEM product** | engineering | 1–16 | **E** DeepStream | zero custom code, NVIDIA-supported, config not C++ |
 
 ---
@@ -86,7 +88,8 @@ there is nothing to hide the transfer behind, so the whole saving lands on the
 frame — **−16.3% latency**, for free, with no accuracy cost. Batched pipelines
 get nothing from it; closed loops get the most of anyone.
 
-> **If something moves because of the detection: A2. Do not batch. Ship UINT8
+> **If something moves because of the detection: A2. Do not batch — unless 8+
+> cameras fire together, where a short batching window bounds p99. Ship UINT8
 > input. Measure p99, not p50, and measure the whole loop.**
 
 ### 2. Stream density — cameras per GPU is the budget
@@ -106,12 +109,20 @@ Two things dominate that number, and neither is the model:
   cameras** against B2's 1131 fps, with an identical server behind it.
 - **Decode.** Capacity mode replays pre-made tensors, so the fps figures here are
   the *inference and plumbing* ceiling. Real cameras must be decoded first, and
-  NVDEC capacity is a separate budget this study does not measure — check it
-  before you size a box from these numbers.
+  NVDEC capacity is a separate budget, [measured](nvdec.md): no session limit,
+  ~768 fps at 1080p (~25 cameras at 30 fps), ~2,530 fps at 640×360. At 1080p the
+  decoder, not the detector, caps one 3090 — check it before you size a box from
+  these numbers.
 
-If you are past ~64 streams and can tolerate latency, move to **D**: batching is
-**37% cheaper GPU time per frame**, which is 37% more cameras on the same card.
-That is the one place the batching trade is unambiguously worth taking.
+Past ~32 live cameras, turn batching on. B2 tops out at ~1,100 fps under live traffic (~36
+cameras at 30 fps); **B3** — the same synchronous client with a short dynamic-batching window
+— keeps frames at 9–13 ms at 48 cameras, where B2's queue runs seconds behind. The
+best window grows with load: 0 µs up to 16 cameras, 500 µs at 32, 5 ms at 48
+([live traffic](live-batching.md#4-the-right-window-grows-with-load)). Batching
+makes each frame **37% cheaper on the GPU**, which lifts one 3090's live capacity
+from ~1,100 to ~1,650 fps: it keeps up at 48 cameras and nothing does at 56.
+Beyond that, add a GPU or INT8. That is the one place the batching trade is
+unambiguously worth taking.
 
 Also relevant here: **INT8** is +32.8% throughput for −1.55 mAP points
 ([Precision](precision.md)) — a third more cameras per GPU, and it beats
@@ -123,8 +134,9 @@ at high stream counts the bus is a shared budget. D alone already moves ~12.9 GB
 of a ~24 GB/s link; a second pipeline on the same card is competing for what is
 left.
 
-> **If the answer goes into a database: B2 up to a few dozen streams, D beyond
-> that. Fix transport before you buy hardware.**
+> **If the answer goes into a database: B2 up to ~30 cameras, B3 (a short batching
+> window) beyond that, a second GPU somewhere between 48 and 56. Fix transport
+> before you buy hardware.**
 
 ### 3. Wall clock — there is no camera
 
@@ -132,26 +144,34 @@ Archive re-indexing, retro-search after an incident, dataset labelling, model
 evaluation. The input is a file, the metric is hours-to-finish, and latency has
 no meaning at all.
 
-This is **D**, without qualification. Every objection to batching disappears when
-nothing is waiting: 1665 fps single-model, 1816 fps with three models sharing the
-GPU, at 0.61 ms of GPU service per frame against the batch-1 engine's 0.97 ms.
+This is **batch 8**, in-process or through Triton. Every objection to batching
+disappears when nothing is waiting. A2 at batch 8 and D tie at ~1,620 fps on one
+model, A2 at about a quarter of D's latency; on three models a batched in-process
+loop reaches 2,280 fps against Triton's 1,780
+([correction](batching.md#correction-the-throughput-lead-is-batching-not-triton),
+[multi-model](batching.md#the-multi-model-lead-reverses)). Either way the GPU
+spends 0.61 ms per frame against the batch-1 engine's 0.97 ms. Pick D if you want
+a shared server; the throughput is the same or better without one.
 
-The one thing to get right is that **dynamic batching needs async, in-flight
-clients**. A synchronous client pays the queue window and never collects the
-benefit — it is the fifth of the [six lessons](../README.md#six-things-wed-tell-ourselves-at-the-start),
-and the easiest to get wrong by accident.
+The one thing to get right is that **batches need frames that arrive together**.
+In-process, read eight frames and submit them as one batch; through Triton, keep
+many requests in flight — an async client, or many workers. A single synchronous
+client pays the window and never fills a batch. That is the corrected fifth of the
+[six lessons](../README.md#six-things-wed-tell-ourselves-at-the-start), and the
+easiest to get wrong by accident.
 
-> **Offline means D. Async client, batch-8, and INT8 if the accuracy cost is
-> acceptable.**
+> **Offline means batch 8: A2 at batch 8 in-process, or D if you want a server.
+> And INT8 if the accuracy cost is acceptable.**
 
 ### 4. Engineering budget — who owns this in two years
 
 Sometimes the binding constraint is not the GPU. Two honest cases:
 
 **Python-only team → C2.** The interesting result is how little it costs:
-**1.69 ms, 1038 fps**, within 0.4 ms of the C++ pipeline, using a pure-numpy
-client and system shared memory. Python is not the problem — *transport* is the
-problem, and C1's 6.4 ms / 225 fps is what Python looks like when you get
+**1.69 ms at one stream, 1038 fps at sixteen**, within 0.5 ms of the C++
+pipeline, using a pure-numpy client and system shared memory. Python is not the
+problem — *transport* is the problem, and C1's 6.4 ms / 225 fps ceiling is what
+Python looks like when you get
 transport wrong. If your team is Python and the work is not a control loop, C2 is
 a legitimate production answer, not a compromise.
 
@@ -175,9 +195,9 @@ Being explicit about this matters more than the mapping above.
 |---|---|---|
 | **Jetson / Orin edge devices** | The *ordering* — transport dominates, plumbing costs more than the model, batching trades latency for throughput | Every absolute number. Unified memory changes the transport picture; there is no PCIe hop to avoid |
 | **Multi-GPU or cloud scale-out** | Per-GPU pipeline choice | Scheduling, placement and routing — untouched here; see [Roadmap](roadmap.md) |
-| **Segmentation, pose, tracking, VLMs** | The plumbing analysis | The engine numbers, and possibly the conclusion: a heavier model shifts the balance back toward the GPU |
+| **Segmentation, pose, tracking, VLMs** | The plumbing analysis | The engine numbers. A heavier model shifts the balance back toward the GPU — measured in [Model cost](model-scaling.md) and [Across architectures](model-zoo.md) |
 | **Detect-and-track pipelines** | Everything about the detection stage | The frame economics — tracking between keyframes can cut inference load by an order of magnitude, which beats any choice on this page |
-| **Accuracy-critical work** (medical, metrology) | Nothing on this page | Start at [Accuracy](accuracy.md) instead. A 1.25% mAP resize bug survived every one of these flows undetected |
+| **Accuracy-critical work** (medical, metrology) | Nothing on this page | Start at [Accuracy](accuracy.md) instead. A resize bug costing ~0.6 mAP (1.25% relative) survived every one of these flows undetected |
 
 That last row deserves its own sentence. If being *right* matters more than being
 fast, the pipeline choice is secondary and the preprocessing audit is primary —
@@ -191,7 +211,8 @@ throughput number revealed it.
 > **Does something move because of the detection?**
 
 Yes → **A2**, no batching, measure p99.
-No → **B2** for tens of streams, **D** for hundreds or for offline.
+No → **B2** up to ~30 cameras per GPU, **B3** (B2 plus a short batching window)
+beyond that, **batch 8** (in-process or D) for offline.
 Neither, because you need to ship next quarter → **DeepStream**.
 
 Everything else on this site is the evidence for those three lines.

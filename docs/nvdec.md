@@ -28,7 +28,8 @@ Sessions 1–32, 3 interleaved repeats, the decoder's utilisation sampled every 
 | 32 | 2,526 (84.2) | 768 (25.6) |
 
 \* One single-session 640×360 repeat reached only 1,303 fps with the decoder 69% busy;
-the median of the three is shown. Every other run held the decoder at 98–100%.
+the median of the three is shown. Every other run held the decoder at 88–100% (all but
+one at 98–100%).
 
 **There is no session limit.** Thirty-two concurrent sessions all ran. (The cap on
 consumer cards applies to NVENC, the encoder, not to NVDEC.) **The decoder is the
@@ -46,6 +47,12 @@ Against 768 fps of 1080p decoding, **a 1080p camera fleet is decoder-bound at ab
 cameras per 3090**, with only half to two-thirds of the detector's capacity in use. At the study's
 640×360, the decoder (84 cameras) outruns the detector (40–54 cameras), which is why
 the rest of this study never hit it.
+
+Decoder and detector were measured separately. Running both on one card shares its
+power budget (the 3090 already draws ~348 W of 350 W at 48 live cameras), so treat
+~25 cameras at 1080p as an upper bound. The detector side matches the
+[live-camera measurement](live-batching.md#6-choosing-a2-b2-or-b3-at-each-load): A2
+keeps up at 32 cameras but not at 48; batching configs still keep up at 48.
 
 For sizing: count **decoded pixels** as well as inference. A card with more NVDEC
 engines (data-centre parts carry several), or cameras streaming at lower resolution,

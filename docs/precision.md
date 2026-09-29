@@ -1,13 +1,15 @@
-# Precision and sparsity — speed ceilings
+# Precision and sparsity — ceilings, and the calibrated INT8 result
 
 [← index](../README.md) · prev: [Accuracy](accuracy.md) · next: [Reproduce](reproduce.md)
 
-> ## ⚠️ These are throughput numbers only
-> **No accuracy was measured**, and the INT8 engines here were built **without a
-> calibration set** — TensorRT falls back to generated scales, so their detections
-> are meaningless. The purpose is to *bound* what INT8 and 2:4 sparsity could buy
-> on this GPU, so you can judge whether the accuracy work (a real calibration set
-> plus an mAP harness) is worth doing. **Do not quote these as "INT8 results".**
+> ## ⚠️ The first two tables are speed ceilings only
+> The INT8 engines in [Result](#result) and
+> [The comparison that actually matters](#the-comparison-that-actually-matters) were
+> built **without a calibration set** — TensorRT falls back to generated scales, so
+> their detections are meaningless. Their purpose is to *bound* what INT8 and 2:4
+> sparsity could buy on this GPU. **Do not quote them as "INT8 results".** The real,
+> calibrated and mAP-scored INT8 result is in
+> [Calibrated INT8](#calibrated-int8-the-actual-result).
 
 Script: [`scripts/precision_ceilings.sh`](../scripts/precision_ceilings.sh) ·
 raw data: [`results/v3/precision_ceilings.tsv`](../results/v3/precision_ceilings.tsv).
@@ -93,7 +95,8 @@ the same FP16 YOLOv8s baseline:
 **INT8 strictly dominates**: more speed *and* less accuracy lost. If you were
 about to drop to a smaller model for throughput, quantise the bigger one instead.
 
-And stacked against the free lever: [CUDA graphs](cuda-graphs.md) give +14.9% at
+And stacked against the free lever: [CUDA graphs](cuda-graphs.md) give +14.9% on
+the engine (+11.8% inside A2) at
 **zero** accuracy cost. The order of operations is therefore graphs first, then
 INT8, then model choice last.
 
@@ -119,7 +122,8 @@ The working route is two-stage, and
 
 The engine that comes out loads in Triton and is what the table above measures.
 
-## Still not answered## Still not answered
+## Still not answered
+
 - **Sparsity with retraining.** Not attempted, and finding 2 argues it is not
   worth attempting on this workload.
 - **INT8 through the pipelines.** These are `trtexec` engine measurements; no A2/B2/D

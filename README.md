@@ -1,5 +1,7 @@
 # Triton vs Pure TensorRT vs DeepStream — Inference Pipeline Benchmark
 
+prev: [Introduction](docs/introduction.md) · next: [Use cases](docs/use-cases.md)
+
 **📖 [Read this as a site](https://sadbodhs.github.io/computer_vision_optimization/overview/)** — searchable, with an interactive version
 of the chart below.
 
@@ -32,26 +34,26 @@ turned out to be wrong, and what it took to get a trustworthy one.
 | [Introduction](docs/introduction.md) | Why does this choice even matter? | The plumbing costs more than the model; "fastest" depends on latency vs throughput |
 | [Use cases](docs/use-cases.md) | Which of these is for *my* problem? | Four binding constraints; in three of them the lowest-latency pipeline is the wrong pick |
 | [Methodology](docs/methodology.md) | How were these numbers produced? | A benchmark that saturates the source measures the source |
-| [Results](docs/results.md) | How fast is each pipeline? | A2 lowest latency (1.23 ms); D highest throughput (1665 fps) |
+| [Results](docs/results.md) | How fast is each pipeline? | A2 lowest latency per frame; D's 1665 fps is batch 8 — A2 at batch 8 ties it (1,622 vs 1,624) at a quarter of the latency |
 | [DeepStream](docs/deepstream.md) | What does NVIDIA's own stack do? | 1.50 ms/frame, zero custom code, source-bound at 5.4% GPU |
 | [Transport](docs/transport.md) | Which shared memory, and when? | CPU data → sys-shm (3.6×); GPU data → CUDA IPC (3×) |
 | [Moving fewer bytes](docs/fewer-bytes.md) | Why is the tensor that big? | UINT8 input + in-graph /255 cuts the wire 4x for free: +87.6% on B1, 0% on D, +0.0001 mAP |
-| [Stage decomposition](docs/stage-decomposition.md) | Where does the time actually go? | With zero-copy, Triton's whole framework costs 0.18 ms |
+| [Stage decomposition](docs/stage-decomposition.md) | Where does the time actually go? | The engine is 0.97 ms of a ~1.25 ms frame. Triton's zero-copy overhead over A2 is 0.3–0.9 ms/frame on the same clock, not the 0.18 ms first published ([correction](docs/live-batching.md#6-choosing-a2-b2-or-b3-at-each-load)) |
 | [Model cost](docs/model-scaling.md) | When does the plumbing stop mattering? | Non-engine cost is fixed at 0.256 ms; A2 crosses under 10% at a 2.3 ms engine, B1 not until 10.4 ms |
 | [Across architectures](docs/model-zoo.md) | What sets the plumbing cost? | Output bytes / 25 GB/s — and output shape is an architectural choice: DeepLabV3 pays 57% transport, SegFormer-B0 14%, at the same engine cost. Params predict engine time at r&sup2; 0.80 in bulk, but ResNet50 and YOLO11l share 25M and differ 5.8x |
-| [Batching](docs/batching.md) | Is dynamic batching free? | No — 37% cheaper GPU/frame, paid in 6–74 ms added latency (mostly in-flight depth, not queue) |
+| [Batching](docs/batching.md) | Is dynamic batching free? | No — the batch-8 engine is 37% cheaper per frame, but only when requests arrive together. D's 6–74 ms is its client's own 8-deep queue (Little's law), not the price of batching: a live camera pays ~0.5 ms (0 µs window) to ~5.5 ms (D's 5 ms window) |
 | [Live traffic (B3)](docs/live-batching.md) | What does batching cost a live camera? | ~0.5 ms with a zero window, ~5.5 ms with D's 5 ms window; past B2's capacity it is 13 ms against 2 s |
 | [Triton tuning](docs/triton-tuning.md) | Were the Triton knobs right? | `count:2` validated (+30% over 1); graphs and instances are substitutes |
 | [CUDA graphs](docs/cuda-graphs.md) | Is the engine ceiling real? | No — ~0.13 ms of it is launch overhead; +11.8% inside A2, and its plateau rises 1167→1249 fps |
-| [In-graph NMS](docs/in-graph-nms.md) | Is the 2.82 MB output worth removing? | On raw gRPC yes — +33% despite a 19% slower engine; on zero-copy paths, no |
+| [In-graph NMS](docs/in-graph-nms.md) | Is the 2.82 MB output worth removing? | On raw gRPC yes — +33% despite a 19% slower engine; on zero-copy paths probably not (untested) |
 | [Contention](docs/contention.md) | What if N pipelines share the GPU? | MPS gives A2 +32% but B2 nothing — Triton's edge inverts once MPS is on |
 | [Manufacturing inspection](docs/inspection.md) | What does a label-free visual QA line cost to serve? | **Now its own study** ([site](https://sadbodhs.github.io/manufacturing_inspection/)): ~10 cameras per 3090 at 4 parts per frame; TensorRT brute force beats FAISS/cuVS for PatchCore's search; the rare heavy stage sets the tail |
-| [Accuracy](docs/accuracy.md) | Does the pipeline preserve the model? | Yes, for every model and both engine shapes; batching is accuracy-free; nearest-neighbour resize cost ~0.6 mAP (fixed) |
+| [Accuracy](docs/accuracy.md) | Does the pipeline preserve the model? | Yes, for all three YOLO models tested and both engine shapes; batching is accuracy-free; nearest-neighbour resize cost ~0.6 mAP (fixed) |
 | [Precision](docs/precision.md) | Is INT8 worth it? | +32.8% throughput for −1.55 mAP — and it beats downgrading the model; sparsity ~+1%, not worth it |
-| [Reproduce](docs/reproduce.md) | How do I run this myself? | Four commands from a clean clone |
+| [Reproduce](docs/reproduce.md) | How do I run this myself? | Five commands from a clean clone |
 | [On another GPU](docs/other-gpus.md) | Do these numbers apply to my card? | Timers and software behaviour carry over; shapes carry over; positions do not. Keep A2/B2 under ~80% GPU utilisation |
 | [Decoder capacity](docs/nvdec.md) | How many cameras can NVDEC decode? | No session limit; ~768 fps at 1080p (25 cameras at 30 fps), ~2,530 at 640×360 (84). At 1080p the decoder, not the detector, caps one 3090 |
-| [Roadmap](docs/roadmap.md) | What is *not* covered? | No accuracy axis, no INT8; MPS and CUDA graphs now measured |
+| [Roadmap](docs/roadmap.md) | What is *not* covered? | Accuracy, INT8, sparsity, MPS, CUDA graphs, live traffic (B3) and NVDEC are now measured; still open: INT8 through the flows, detect-and-track, multi-GPU, and why one live camera is slower than four on Triton |
 
 **Two reading paths.** Start-to-finish: the table above is in reading order —
 why it matters, then how it was measured, then what was measured, then what it
@@ -102,7 +104,7 @@ Two consequences to hold onto when reading the tables:
   ([measured](docs/batching.md#what-batch-size-does-d-actually-form)).
 
 **Reference ceiling**: `trtexec` on the batch-1 engine = **0.97 ms/frame,
-1028 fps**; the batch-8 engine = **0.61 ms/frame** (1630 fps effective). Every
+1028 fps**; the batch-8 engine = **0.61 ms/frame** (~1,650 fps effective). Every
 number below is the story of what stands between your camera and that 0.97 ms.
 
 ## Headline numbers
@@ -116,9 +118,9 @@ process — not how long a frame from a live camera would wait.
 | Flow | Best latency (p50) | Best throughput | In one line |
 |---|---|---|---|
 | **A2** C++ TRT full-CUDA | **1.23 ms** | 1219 fps; **1622 fps at batch 8** | Lowest latency, in-process control, zero dependencies |
-| **B2** Triton + CUDA shm | 1.28 ms‡ | 1131 fps | Triton without the tax — ≈A2 latency, plus server ops |
-| **C2** Triton + numpy + sys-shm | 1.69 ms | 1038 fps | Python within 0.4 ms of C++ |
-| **D** Triton async + dynamic batching | 6.2–74 ms† | **1665–1816 fps** | High throughput; latency is the price. A batched in-process loop matches it on one model and beats it on three |
+| **B2** Triton + CUDA shm | 1.28 ms‡ | 1131 fps | Triton with a small tax — 0.3–0.9 ms/frame over A2 on the same clock‡, plus server ops |
+| **C2** Triton + numpy + sys-shm | 1.69 ms | 1038 fps | Python within 0.5 ms of C++ |
+| **D** Triton async + dynamic batching | 6.2–74 ms† | **1665 fps** (1 model) · **1816** (3 models) | High throughput; latency is the price. A batched in-process loop matches it on one model and beats it on three |
 | **E1** DeepStream | 1.50 ms | 45 fps/stream (source-bound) | Zero custom code, integrated NVDEC→infer |
 | B1 raw gRPC · C1 torch | 3.27 / 6.4 ms | 496 / 225 fps | What "just use the server" costs if you feed it naively |
 
@@ -170,7 +172,7 @@ moment it is due, upload included ([live traffic](docs/live-batching.md)).
   limit** — B2's median frame is 2 s late at 48 cameras — while every batching
   config stays at 9–13 ms. Bigger batches free GPU time, and near capacity that
   *is* latency.
-- **When cameras fire together**, batching bounds the tail (13–24% lower p99 in
+- **When cameras fire together**, batching bounds the tail (13–26% lower p99 in
   synchronised bursts) and A2 falls behind.
 
 So the pipeline is chosen by the load you will run at, and a short batching window
@@ -181,16 +183,21 @@ is cheap insurance if that load can spike. Per-load picks, bursts and p99:
 
 | Scenario | Pick | Latency (p50/frame) | Throughput | Why this pick |
 |---|---|---|---|---|
-| Live camera, lowest latency, full control | **A2** — C++ TRT full-CUDA | **1.23 ms** | 809 fps | fastest per frame; zero dependencies |
-| Live multi-stream, want a server | **B2** — Triton + CUDA shm | 1.28 ms‡ | 1131 fps | ≈A2 latency + Triton ops (reload, metrics) |
-| Live cameras, bursts or load spikes possible | **B3** — B2's client + 0 µs dynamic batching | ~0.5 ms over B2 (paced mode) | bounded to ~1,650 fps | bounded tail in bursts; survives past B2's ~1,131 fps ([measured](docs/live-batching.md)) |
-| Python-only team | **C2** — Triton + numpy + sys-shm | 1.69 ms | 1038 fps | within 0.4 ms of C++ with pure-Python client |
+| Live camera, lowest latency, full control | **A2** — C++ TRT full-CUDA | **1.48–1.63 ms** live (1–16 cameras) | ~1,290 fps live · 1219 capacity | fastest per frame below capacity; zero dependencies ([measured](docs/live-batching.md#6-choosing-a2-b2-or-b3-at-each-load)) |
+| Live multi-stream, want a server | **B2** — Triton + CUDA shm | 1.91–2.50 ms live (1–16 cameras) | ~1,100 fps live · 1131 capacity | 0.3–0.9 ms/frame over A2, plus Triton ops (reload, metrics) |
+| Live cameras, bursts or load spikes possible | **B3** — B2's client + dynamic batching: 0 µs window up to 16 cameras, 500 µs at 32, D's 5 ms for synchronised bursts or 48+ | ~0.5 ms over B2 at low load (0 µs window, live) | ~1,650 fps live | 13–26% lower p99 in synchronised bursts; 9–13 ms at 48 cameras where B2's frames are 2 s late ([measured](docs/live-batching.md)) |
+| Python-only team | **C2** — Triton + numpy + sys-shm | 1.69 ms (capacity) | 1038 fps | within 0.5 ms of C++ with pure-Python client (capacity mode; not measured live) |
 | Offline / max throughput, one model | **A2 at batch 8** or **D** (a tie) | A2: 10 ms · D: 37 ms† | ~1,620 fps both | same batch-8 engine; A2 in-process with a quarter of D's latency, D if you want a server ([measured](docs/batching.md#correction-the-throughput-lead-is-batching-not-triton)) |
 | Multi-model serving, throughput | **A2 at batch 8**, all models in one process | 10.5 ms | **2,280 fps** (3 models) | beats Triton's multi-model D (1,780 fps, 30 ms) by 28% ([measured](docs/batching.md#the-multi-model-lead-reverses)); pick **D** when you need a shared server, reloads and metrics |
 | Edge product, NVIDIA-supported stack | **E** — DeepStream | 1.50 ms (1 stream) | 45 fps/stream (source-bound) | zero custom code; NVDEC→infer integrated |
 
-At 30 FPS live video (33.3 ms budget) *every* flow keeps up — the differences are
-in latency headroom, not capability.
+*Live rows: paced-mode turnaround, timed from each frame's due time with the upload
+included. Offline rows and "capacity" figures: capacity mode. The two are not
+comparable.*
+
+At 30 FPS (33.3 ms budget) every flow keeps up per camera below its capacity — the
+differences there are in latency headroom. Past it (48 cameras on this 3090) only the
+batching configs do.
 
 ## Six things we'd tell ourselves at the start
 
@@ -199,8 +206,10 @@ in latency headroom, not capability.
    latency are the same number read two ways, and literally so: latency ≈
    in-flight requests ÷ throughput ([Little's law](docs/batching.md#where-ds-latency-actually-goes)).
    Most of it is the client's own 8-deep window, not Triton's batching queue.
-3. **The GPU is almost never the bottleneck at the edge.** The fight is over PCIe
-   round trips, serialization, and interpreter locks.
+3. **At one frame in flight, the GPU mostly waits.** The fight there is over PCIe
+   round trips, serialization, and interpreter locks. Under load it does saturate —
+   77% busy at 32 live cameras, 100% at 48, and power-limited at 348 of 350 W
+   ([measured](docs/live-batching.md#7-how-busy-the-gpu-was)).
 4. **Match preprocessing bit-for-bit before comparing pipelines.**
 5. **Dynamic batching needs requests that arrive together — not async clients**
    *(corrected 2026-09-28)*. We first wrote that sync clients pay for the window
@@ -214,6 +223,9 @@ in latency headroom, not capability.
 ```bash
 docker/build.sh                              # build both images from source
 scripts/export_models.sh                     # pt -> ONNX -> FP16 .plan
+docker run -d --name triton-server --gpus all --shm-size=1g --network host \
+  -v "$PWD/triton/models:/models" -v "$PWD/videos:/work/videos" \
+  triton-bench:v3 tritonserver --model-repository=/models
 scripts/make_frames.sh videos/real.mp4 500   # capacity-replay input
 scripts/benchmark_v2.sh 10 3                  # the full 4-arm sweep
 ```
@@ -227,9 +239,11 @@ single GPU — no longer at a single engine cost, since it now sweeps a
 [model-cost ladder](docs/model-scaling.md) and
 [22 models across four tasks](docs/model-zoo.md). It has an
 [accuracy axis](docs/accuracy.md), including calibrated INT8. MPS, CUDA graphs,
-[in-graph NMS](docs/in-graph-nms.md) and the INT8/sparsity ceilings are measured.
+[in-graph NMS](docs/in-graph-nms.md), the INT8/sparsity ceilings,
+[live camera traffic](docs/live-batching.md) and [decoder capacity](docs/nvdec.md)
+are measured.
 
 **Still not covered:** input resolution (deliberately — a well-understood
-quadratic), application-level tricks like detect-and-track, multi-GPU, and an
-accuracy axis for segmentation. Those limits are enumerated honestly in the
+quadratic), application-level tricks like detect-and-track, multi-GPU, INT8 through
+the flows, and an accuracy axis for segmentation. The open items are listed in the
 [Roadmap](docs/roadmap.md).

@@ -8,6 +8,9 @@ and ended up with numbers we can actually trust.*
 analysis, start at the [index](README.md#index); for the rules that make these
 numbers trustworthy, see [Methodology](docs/methodology.md).
 
+*Parts of §6–§11 were later corrected by further measurement; see
+[§13](#13-postscript-what-we-got-wrong-the-second-time).*
+
 ---
 
 ## 1. The question
@@ -94,8 +97,10 @@ nothing is source-capped and every number means what it says.
 ## 5. What the GPU actually costs
 
 Before the pipelines, the engine itself. `trtexec` on the FP16 YOLOv8s
-engine: **0.97 ms per frame, 1028 frames/second**. That's the physical
-ceiling for batch-1 work on this GPU. YOLOv8n does 1490, YOLO11n does 1259.
+engine: **0.97 ms per frame, 1028 frames/second**. That's the ceiling for one
+batch-1 inference at a time, launched the way every flow here launches it — not
+a hardware floor: ~0.13 ms of it later turned out to be launch overhead
+([CUDA graphs](docs/cuda-graphs.md)). YOLOv8n does 1490, YOLO11n does 1259.
 
 Everything else in this story is the story of what stands between your
 camera and that 0.97 ms.
@@ -107,20 +112,21 @@ Capacity mode — total frames/second across all streams, at concurrency N
 
 | N | A2 (C++ in-proc) | B2 (C++→Triton, CUDA shm) | C2 (Python numpy, sys shm) | D (async, dyn-batch) |
 |---|---|---|---|---|
-| 1 | **809** | 654 | 469 | 1041 |
-| 2 | 793 | 951 | 736 | 1136 |
-| 4 | 956 | 1092 | 986 | 1378 |
-| 8 | 1055 | 1131 | 1037 | **1640** |
-| 16 | 1205 | 1128 | 1038 | **1665** |
+| 1 | 809 | 654 | 469 | **1041** |
+| 2 | **1219** | 951 | 736 | 1136 |
+| 4 | 1175 | 1092 | 986 | **1378** |
+| 8 | 1187 | 1131 | 1037 | **1640** |
+| 16 | 1160 | 1128 | 1038 | **1665** |
 
-And the per-frame latency — the number your video frame actually cares about:
+And the per-frame latency in the same flat-out replay — which is not what a live
+camera sees; that came later (§13):
 
 | N=1 | Latency p50 | vs 33.3 ms frame budget at 30 FPS |
 |-----|------------|-----------------------------------|
 | A2 | **1.23 ms** | 3.7% |
 | B2 | **1.28 ms** | 3.8% |
 | C2 | 1.69 ms | 5.1% |
-| D  | 6.23 ms | 18.7% (batching window) |
+| D  | 6.23 ms | 18.7% (8 frames in flight — mostly the client's own queue) |
 
 ## 7. Where the time actually goes
 
@@ -142,8 +148,10 @@ inference itself is only 1.2 ms. When we gave the client a **CUDA shared
 memory** region — a buffer the client's CUDA kernel writes and the server
 reads through an IPC handle, with *no copy in either direction* — B2's
 throughput jumped from 222 to **654 fps**, and its latency dropped to
-1.28 ms, just 0.05 ms above running the engine in-process. Triton's entire
-framework, given zero-copy buffers, costs about a tenth of a millisecond.
+1.28 ms against A2's 1.23. We read that as Triton's entire framework costing a
+tenth of a millisecond. It was more: A2's clock started before the frame's
+upload and B2's after it, and on one clock A2 is 0.3–0.9 ms faster per frame
+(§13) — still small against a 33 ms frame.
 
 **Second, Python's tax is not copies — it's the GIL.** Swapping the torch
 preprocessing for pure numpy and adding shared memory got the Python client
@@ -163,16 +171,19 @@ The reason is that batching is a bus, and buses need passengers to arrive
 together. Our synchronous clients sent one request, blocked, read the
 answer, then sent the next — so requests trickled in one at a time, the
 5 ms batching window expired empty, and every request paid the window's
-latency while riding alone. The fix was an **async client with eight
-requests in flight** per stream. Suddenly requests co-arrive, batches fill,
-and the same server delivers **1665 fps — the highest number in the entire
-study, and the only configuration that beats in-process C++**.
+latency while riding alone. (True of one client; many synchronous cameras
+turned out to batch just fine once load is high — §13.) The fix was an
+**async client with eight requests in flight** per stream. Suddenly requests
+co-arrive, batches fill, and the same server delivers **1665 fps**, beating
+in-process C++ at batch 1. We wrote it up as the only configuration that beats
+C++ at all. It wasn't: given the same batch-8 engine, C++ ties it — the lead
+was the batch size (§13).
 
-The catch is honest and visible in the latency column: those 1665 frames
-each waited 6–74 ms in the queue for their batch-mates. Batching converts
-latency into throughput. For offline analytics that's the best trade in the
-study. For a live camera with a 33 ms frame budget, it's a bus that misses
-its stop.
+The catch looked honest and visible in the latency column: those frames each
+took 6–74 ms to come back. We concluded that batching converts latency into
+throughput — the best trade in the study for offline analytics, and for a live
+camera with a 33 ms frame budget, a bus that misses its stop. That too turned
+out to be mostly our own client's eight-deep window (§13).
 
 ## 9. What happens when multiple inferences run at once
 
@@ -195,6 +206,11 @@ Three observations:
 - **Triton shares more gracefully than raw CUDA contexts.** At N=3, B2's
   latency grew +76% while A2's grew +153%. The server's shared engine pool
   avoids the context-switch cost that independent processes pay each other.
+
+*The last two did not survive. With MPS on, the plateau lifts and A2 gains
++32% while B2 gains nothing: the "engine cap" was inter-process serialisation,
+and A2 had been handicapped by a daemon that wasn't running
+([contention](docs/contention.md#what-we-concluded-first-and-why-it-was-wrong)).*
 
 For the record, six live 30 fps cameras need 180 fps of aggregate capacity —
 every configuration here covers that with room to spare. Contention only
@@ -225,17 +241,22 @@ every frame of the stream.
    preprocessed input flat-out, or your "2× faster" is really "the camera ran
    at 30 fps."
 2. **Latency and throughput are different products.** Flow D's 1665 fps and
-   6–74 ms queue wait are the same number read two ways. Pick per use case:
-   B2 for live streams, D for offline throughput, A2 when you want no
-   dependencies, C2 when your team is Python-only.
-3. **The GPU is almost never the bottleneck at the edge.** Every Triton
-   configuration in this study left it >90% idle until we removed the copies.
-   The fight is over PCIe round trips, serialization, and interpreter locks.
+   its 6–74 ms are the same number read two ways (latency ≈ in-flight ÷
+   throughput). Pick per use case: A2 or B2 for live streams below capacity,
+   a short batching window (B3) past it, batch 8 (in-process or D) for offline
+   throughput, C2 when your team is Python-only *(corrected, §13)*.
+3. **At one frame in flight, the GPU is mostly waiting.** Every Triton
+   configuration in this study left it >90% idle until we removed the copies;
+   the fight is over PCIe round trips, serialization, and interpreter locks.
+   Under load that stops being true: 100% busy at 48 live cameras, at the
+   card's power limit *(corrected, §13)*.
 4. **Match preprocessing bit-for-bit before comparing pipelines** — a
    different letterbox silently changes detection counts and invalidates
    everything downstream.
-5. **Dynamic batching requires async in-flight clients.** Sync clients pay
-   for the batching window and never collect the benefit.
+5. **Dynamic batching needs requests that arrive together, not async
+   clients** *(corrected, §13)*. One sync client pays for the window and
+   never collects the benefit; many live cameras, each synchronous, still form
+   batches once load is high.
 6. **Shared memory: pick by data location.** CPU data → system shm; GPU data
    → CUDA IPC shm. And reuse one registered region per stream for the life
    of the stream — never allocate per frame.
@@ -260,6 +281,37 @@ scripts/make_frames.sh videos/real.mp4 500   # frames.bin
 Raw data: `results/` (v1 = the flawed first pass, kept for honesty;
 v2 = the corrected sweep; `parallel_contention.md` = the multi-instance
 study; `comparison_tables.md` = the fair tables).
+
+## 13. Postscript: what we got wrong the second time
+
+The rebuilt study held up far better than the first pass, but not everywhere.
+Each of these was corrected by measuring what we had inferred:
+
+- **The throughput lead was batch size, not Triton.** Given the same batch-8
+  engine, the in-process C++ pipeline ties D on one model — 1,622 vs 1,624 fps,
+  at 10 ms against 37 ms p50 — and beats Triton's multi-model serving on three:
+  2,280 vs 1,780 fps, at a third of the latency. Triton's case is operational
+  (one server, reloads, metrics), not speed
+  ([batching](docs/batching.md#correction-the-throughput-lead-is-batching-not-triton)).
+- **D's 6–74 ms was never the cost of batching.** It is Little's law on the
+  client's own eight-frames-in-flight window. Measured the way a camera sends —
+  one frame in flight, on a 33 ms clock — batching costs ~0.5 ms with a zero
+  window and ~5.5 ms with D's 5 ms one; past B2's capacity it is the only thing
+  that keeps up: 13 ms per frame against 2 seconds at 48 cameras
+  ([live traffic](docs/live-batching.md)).
+- **Synchronous clients do batch, given enough of them.** Lesson 5 was true of
+  one client, not of many live cameras.
+- **A2 and B2 were not on one clock.** A2's timer started before the upload,
+  B2's after it. On the same clock A2 is 0.3–0.9 ms faster per frame
+  ([measured](docs/live-batching.md#6-choosing-a2-b2-or-b3-at-each-load)).
+- **The GPU does saturate under load.** At one frame in flight it mostly waits,
+  as lesson 3 says; with live cameras it is 77% busy at 32 and 100% at 48, at
+  348 of its 350 W ([live traffic](docs/live-batching.md#7-how-busy-the-gpu-was)).
+- **The contention findings in §9** were artefacts of MPS being off
+  ([contention](docs/contention.md#what-we-concluded-first-and-why-it-was-wrong)).
+
+The pattern is the one §3 started with, one level up: a number measured under
+one set of conditions, read as if it answered a different question.
 
 ---
 

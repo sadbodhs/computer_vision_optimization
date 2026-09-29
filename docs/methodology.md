@@ -10,11 +10,23 @@ this study was wrong precisely because these rules were not in place — see
 
 ## The two measurement modes
 
-- **Capacity** — preprocessed frames replayed flat-out from disk. Measures what the
-  pipeline can actually do, with no camera pacing. This is where framework
-  overhead shows.
-- **RTSP end-to-end** — live 30 fps sources. Measures "can it keep up + latency",
-  bounded by the source, not the pipeline.
+The two that carry the study's conclusions:
+
+- **Capacity** — preprocessed frames replayed flat-out from disk, closed loop: each
+  client sends its next request the moment a slot frees. Measures how much the
+  pipeline can process, with no camera pacing. This is where framework overhead
+  shows. It does **not** measure how long a live camera's frame waits: its
+  latencies include whatever queue the client builds — 8 frames per stream for D.
+- **Paced** — virtual 30 fps cameras, open loop, one frame in flight each,
+  turnaround timed from each frame's *due* time with the upload included. This is
+  the live-camera measurement ([live traffic](live-batching.md)). Paced and
+  capacity latencies are not comparable.
+
+And one used for decode and DeepStream:
+
+- **RTSP end-to-end** — live 30 fps sources through the real decoder. Measures
+  "can it keep up", bounded by the source, not the pipeline; used in
+  [stage decomposition](stage-decomposition.md) and [DeepStream](deepstream.md).
 
 > **A benchmark that saturates the source measures the source.** The v1 pass
 > compared a source-capped C++ number (29 fps of an available 30) against an
@@ -32,7 +44,7 @@ The capacity input is `frames.bin` — a headerless concatenation of
 | Engine | Per frame | Throughput |
 |---|---|---|
 | batch-1 | **0.97 ms** | 1028 fps |
-| batch-8 | 4.84 ms / 8 frames = **0.61 ms** | 1630 fps effective |
+| batch-8 | 4.84 ms / 8 frames = **0.61 ms** | ~1,650 fps effective |
 
 Also measured: YOLOv8n **1490 qps** · YOLO11n **1259 qps**.
 
@@ -48,15 +60,19 @@ this study launches per frame, so 0.97 ms is what they are all measured against;
 ## How to read the tables
 
 Two independent scores per pipeline: *throughput* and *latency*. A pipeline can
-win one and lose the other — that is the whole Triton-vs-C++ story, and the whole
-point of [flow D](batching.md).
+win one and lose the other — that is the whole point of [flow D](batching.md). It
+was first read as a Triton-vs-C++ story; given the same batch-8 engine, in-process
+C++ ties D, so it is a batch-size story
+([correction](batching.md#correction-the-throughput-lead-is-batching-not-triton)).
 
-**Flow D reads differently on purpose**: `1041↑ · wait 6.2 · svc 0.61` means each
-frame **waits 6.2 ms** for its batch to fill, then the GPU **services it in
-0.61 ms**. D's high fps is *bought with latency* — though most of that latency
-is the client's in-flight window rather than the batching queue, and `svc 0.61`
-is the engine's floor rather than a measurement. Both are unpicked in
-[batching](batching.md#where-ds-latency-actually-goes).
+**Flow D reads differently on purpose**: `1041↑ · 6.2↓ (engine floor 0.61)` means
+1041 fps, a 6.2 ms p50 round trip, and a batch-8 engine whose `trtexec` floor is
+0.61 ms per frame — not a measurement of the server. The 6.2 ms is mostly the
+client's own window: eight frames in flight per stream queue behind each other
+(Little's law), and only ~1.3 ms of it is Triton's batching queue. Both are
+unpicked in [batching](batching.md#where-ds-latency-actually-goes). A live camera,
+with one frame in flight, pays ~0.5–5.5 ms for batching instead
+([live traffic](live-batching.md)).
 
 ### Notation
 
@@ -110,9 +126,14 @@ All numbers are medians across ≥3 runs unless noted; variance was <±2% — wi
 - DeepStream postprocess semantics differ (`cluster-mode=2` vs our class-aware
   NMS), so **detection counts** differ between E and the other flows; inference
   cost does not.
-- There is **no accuracy (mAP) axis** in this study — every flow runs the same
-  FP16 weights, so speed is comparable, but see [roadmap](roadmap.md) for why this
-  becomes essential the moment INT8 enters.
+- Accuracy is measured on its own page, not per run: every flow runs the same
+  FP16 weights, so speed is comparable, and [accuracy](accuracy.md) confirms the
+  pipelines preserve the model's mAP. INT8 is measured in
+  [precision](precision.md): +32.8% throughput for −1.55 mAP points.
+- **A2's and B2's capacity latencies are not like-for-like.** A2's clock starts
+  before the frame's upload to the GPU, B2's after it. On the same clock (paced
+  mode) A2 is 0.3–0.9 ms faster per frame
+  ([measured](live-batching.md#6-choosing-a2-b2-or-b3-at-each-load)).
 
 ---
 

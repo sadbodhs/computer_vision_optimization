@@ -14,8 +14,8 @@ What each file is, and how it maps to the tables in the top-level README/STORY.
 | `capacity_table.tsv` | — | The canonical capacity numbers (flow × concurrency → fps, latency) as data, so `scripts/make_plots.py` can regenerate the figures. Mirrors the table in `docs/results.md`. |
 | `stage_decomposition.tsv` | — | Per-stage per-frame times behind the stage-decomposition figure. |
 | `comparison_tables.md` | v2 | The fair tables (per-frame latency, per-frame GPU cost) + Flow E (DeepStream). |
-| `parallel_contention.md` | v3 | Multi-instance contention study (`scripts/parallel_test.sh`). |
-| `v3/accuracy.tsv` | v3 | COCO val2017 mAP (500 imgs): study chain vs ultralytics reference (`scripts/accuracy_eval.py`, `scripts/accuracy_reference.py`). |
+| `v3/parallel_contention_N3.tsv` | v3 | Multi-instance contention at N=3, MPS off (`scripts/parallel_test.sh`): A2, B2 and C2, one row per instance, one repeat. One B2 instance ran at 4.46 ms p50 against 2.22-2.32 for the other two. |
+| `v3/accuracy.tsv` | v3 | COCO val2017 mAP (500 imgs): study chain vs ultralytics reference (`scripts/accuracy_eval.py`, `scripts/accuracy_reference.py`). Includes the nearest-resize row (the original bug) and the calibrated INT8 row. |
 | `v3/deepstream_capacity.tsv` | v3 | E2 capacity-mode attempt. **Harness-bound, not a DeepStream ceiling** - GPU median 0% at 8 streams. Do not quote 501 fps as E2 capacity. |
 | `v3/model_scaling.tsv` | v3 | The model-cost ladder (YOLO11 n/s/m/l/x + yolov8s control) through A2, 3 interleaved repeats (`scripts/model_scaling.sh`). `non_engine_ms` is p50 minus engine time - the column the page is about. |
 | `v3/fewer_bytes.tsv` | v3 | Engine-level A/B of UINT8 input + in-graph /255 (`scripts/fold_norm.py`), batch 1 and 8, against FP32 and against the FP16 output binding. |
@@ -44,9 +44,11 @@ What each file is, and how it maps to the tables in the top-level README/STORY.
 | `v3/in_graph_nms.tsv` | v3 | Output-size A/B: engine throughput and raw-gRPC round trip for the stock `[1,84,8400]` head vs an in-graph-NMS `[1,300,6]` build (`scripts/probe_transport.py`). |
 | `v3/batching_knobs.tsv` | v3 | `preferred_batch_size` x `max_queue_delay_microseconds` sweep on flow D at concurrency 1 and 8 (`scripts/batching_knobs.sh`). |
 | `v3/triton_knobs.tsv` | v3 | `instance_group count` x CUDA graphs sweep on B2 (`scripts/triton_knobs.sh`), 3 repeats per cell. |
-| `v3/precision_ceilings.tsv` | v3 | INT8 / sparsity **speed ceilings** (`scripts/precision_ceilings.sh`). Throughput only — INT8 built without calibration, accuracy invalid. |
+| `v3/precision_ceilings.tsv` | v3 | INT8 / sparsity **speed ceilings** (`scripts/precision_ceilings.sh`), uncalibrated — accuracy invalid — plus one `int8_calibrated` row (1358.72 qps) whose mAP is in `accuracy.tsv`. |
 | `v3/cuda_graphs.tsv` | v3 | CUDA Graphs A/B across all three engines (`scripts/cuda_graphs.sh`), 3 repeats per cell. |
-| `v3/mps_contention_N3.tsv` | v3 | CUDA MPS A/B for A2 at N=3 (`scripts/mps_contention.sh`), 3 repeats per condition. MPS off ~960 fps / 3.115 ms; MPS on ~1266 fps / 2.476 ms. |
+| `v3/cuda_graphs_pipeline.tsv` | v3 | CUDA graphs inside A2 (`trt_pipeline_cuda --cuda-graph`, `scripts/cuda_graphs_pipeline.sh`), capacity mode: graph off/on at 1, 2 and 4 streams, 5 repeats at 1 stream and 3 above. +11.8% at 1 stream (~799 → ~894 fps, means); plateau at 4 streams ~1167 → ~1249. |
+| `v3/mps_contention_N3.tsv` | v3 | CUDA MPS A/B at N=3 for A2 and B2 (`scripts/mps_contention.sh`), 3 repeats per condition, 3 instances each. Medians — A2: 951.8 fps / 3.145 ms off, 1258.9 fps / 2.487 ms on. B2: 977.2 / 2.295 off, 993.6 / 2.760 on (B2 p95 4.51 → 2.80 ms). |
+| `v3/reproduction_repeats.tsv` | v3 | The five re-runs of the two out-of-variance cells discussed below (A2 @ conc 2, D @ conc 4). |
 
 ## Reading the v2 TSVs (important)
 
@@ -107,7 +109,7 @@ The published tables are left as they are — they are a real run, and re-runnin
 does not make an earlier honest measurement retroactively wrong. What changes is
 the confidence attached: treat A2 @ conc=2 as ±12%, and D @ conc=4 as ~1337.
 
-## Regenerating## Regenerating
+## Regenerating
 
 ```bash
 scripts/make_frames.sh videos/real.mp4 500   # capacity-replay input

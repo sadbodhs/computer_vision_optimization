@@ -17,13 +17,15 @@ numbers fairly: latency per frame, per-frame GPU cost, and suitability.
 
 | Flow | conc=1 | conc=8 | conc=16 | Effective GPU cap |
 |---|---|---|---|---|
-| A2 | 809 | — | ~1205* | 1028 qps (batch-1 engine) |
+| A2 | 809 | 1187 | 1160* | 1028 qps (batch-1 engine) |
 | B2 | 654 | 1131 | 1128 | 1028 (same engine, via server) |
 | C2 | 469 | 1037 | 1038 | 1028 (same engine, via server) |
 | D | 1041 | 1640 | **1665** | 1649 (batch-8 engine) |
 
-*A2's 1205 at conc=16 comes from 16 CUDA streams overlapping H2D/compute/D2H —
-the engine itself is still 1028 qps per stream of work.
+*A2 exceeds the 1028 qps single-stream figure (peak 1219 at conc=2) because multiple
+CUDA streams overlap H2D/compute/D2H — the engine itself is still 1028 qps per
+stream of work. (An earlier version of this table gave 1205 here, which is A1's
+conc=16 value.)
 
 ## Table 3 — Efficiency per frame (the fair unit for D)
 

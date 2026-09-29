@@ -23,6 +23,7 @@ own numbers without repeating two days of benchmarking.
 | Absolute latencies in ms | **No** | |
 | The batch-8 engine's penalty at batch 1 (~0.6 ms here) | Size: **no** | TensorRT tunes kernels per GPU; measure it |
 | The A2–B2 gap (0.3–0.9 ms here) | **Partly** | much of Triton's overhead is CPU and gRPC, so the host CPU matters as much as the GPU |
+| NVDEC has no session limit | **Yes** | driver behaviour; how many frames per second it decodes does not transfer — see [decoder capacity](nvdec.md) |
 
 The rule of thumb that falls out: **timers and software behaviour carry over
 exactly; shapes carry over; positions do not.** Everything in the last group is what
@@ -75,8 +76,10 @@ you can while staying under 80%.
 ## Full process — two to three hours of GPU time
 
 1. **Get the GPU to yourself.** Nothing else running; on a shared box use
-   `scripts/gpu_lock.sh acquire <name>`. Sharing the card measurably distorts every
-   number (~24% here — see [contention](contention.md)).
+   `scripts/gpu_lock.sh acquire <name>`. Sharing the machine measurably distorts every
+   number: a second GPU process raises A2's latency 69% ([contention](contention.md)),
+   and one unrelated CPU job made B2 read 23–29% slow
+   ([re-check](live-batching.md#re-checked-after-a-client-leak)).
 2. **Rebuild engines** with `scripts/export_models.sh` and re-baseline A2 in capacity
    mode (see [reproduce](reproduce.md)).
 3. **Find the wall `W`** in cameras with the quick estimate above.
@@ -104,7 +107,8 @@ The result is your own selection chart: the same questions, answered for your ca
 |---|---|
 | **Power-capped or laptop GPUs** | The wall comes earlier. The 3090 reaches its wall at 348 W of its 350 W limit, with the SM clock dropping from ~1,950 to ~1,760 MHz — part of its wall is a power wall. Lower the limit and the wall moves |
 | **Jetson / Orin** | Unified memory: there is no PCIe upload, so the transport findings and the upload share of turnaround do not apply. `nvidia-smi` is replaced by `tegrastats`, and power modes (`nvpmodel`) move every number |
-| **Data-centre GPUs** (A100, H100, L4, L40) | MIG splits a card into slices, each with its own wall. Batch-8 speedups are often larger, so batching may pay off earlier |
+| **Data-centre GPUs** (A100, H100, L4, L40) | MIG splits a card into slices, each with its own wall. The batch-8 speedup may differ (unmeasured here), so measure where batching starts to pay off |
+| **Any card, 1080p cameras** | The decoder may be the wall before the detector: on the 3090, NVDEC tops out at ~768 fps at 1080p (~25 cameras at 30 fps), below what the detector serves. NVDEC count and generation differ per card — rerun `scripts/nvdec_capacity.sh` ([decoder capacity](nvdec.md)) |
 | **Other TensorRT or Triton versions** | Engines must be rebuilt, kernel choices differ, and the batch-1 penalty of a batch-8 engine may change. The auto-batching behaviour should be re-checked at `/v2/models/<model>/config` |
 
 ## Contributing a result

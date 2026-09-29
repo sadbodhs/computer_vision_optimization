@@ -68,36 +68,38 @@ The single most useful idea here, and the one most easily lost:
 
 They trade against each other, and optimising one can wreck the other. The
 clearest case in this study is batching: collecting 8 frames and running them as
-one GPU pass is **37% cheaper per frame** — excellent throughput. But each frame
-now waits for seven others to show up. At high concurrency that wait reaches
-**74 ms**, more than two frames of a 30 fps camera.
+one GPU pass is **37% cheaper per frame** — excellent throughput. In the flat-out
+benchmark a batched frame's answer took up to **74 ms**, more than two frames of a
+30 fps camera — and it is tempting to read that as the price of waiting for seven
+others to show up.
 
-For offline video analytics that is the best trade available. For a live camera
-it is a bus that misses its stop.
-
-Except that most of that wait came from the benchmark itself: its client held eight
-frames in flight per stream, which no camera does. Measured the way a camera
-actually sends — one frame in flight, on its 33 ms clock — batching with no wait
-window costs about **0.5 ms**, and once the GPU nears capacity it is the only thing
-that keeps up: **13 ms** per frame against **2 seconds** for the same server taking
-one frame at a time ([live traffic](live-batching.md)). The trade is real, but its
-size depends on how you measure it, and which pipeline is fastest changes with the
-load.
+Most of it is not. It came from the benchmark itself: its client held eight frames
+in flight per stream, which no camera does, and the batch window never waits more
+than 5 ms. Measured the way a camera actually sends — one frame in flight, on its
+33 ms clock — batching with no wait window costs about **0.5 ms**, and with the
+benchmark's 5 ms window about **5.5 ms**. Once the GPU nears capacity it is the only
+thing that keeps up: **13 ms** per frame against **2 seconds** for the same server
+taking one frame at a time ([live traffic](live-batching.md)). The trade is real,
+but its size depends on how you measure it, and which pipeline is fastest changes
+with the load.
 
 So "fastest" is not a well-formed question. **Fastest at what?**
 
 ## The frame budget
 
 A useful anchor. A 30 fps camera gives you a new frame every **33.3 ms**. If your
-pipeline takes longer than that per frame, you fall behind permanently.
+pipeline cannot *process* frames at least that fast, its queue grows and you fall
+behind permanently — 48 live cameras on a server that takes one frame at a time
+end up two seconds late.
 
-Every latency figure here can be read against that budget. It reframes the whole
-comparison: at 1.2 ms per frame you are using 3.7% of it and the difference
-between two pipelines stops mattering; at 74 ms you have already lost.
+Every live-camera latency here can be read against that budget. It reframes the
+whole comparison: at 1.5 ms per frame (A2 under live traffic) you are using under
+5% of it and the difference between two pipelines stops mattering; at two seconds
+you have already lost.
 
 ## What this study does
 
-One model, one GPU, identical preprocessing, nine pipeline variants — and only
+One model, one GPU, identical preprocessing, ten pipeline variants — and only
 the plumbing differs. Each variant isolates one layer, so the cost of that layer
 can be named:
 
@@ -128,10 +130,12 @@ which are paid for somewhere else.
   [Methodology](methodology.md) first. The traps it describes are not exotic; they
   are the default outcome.
 
-A recurring theme is worth stating in advance: **the GPU is almost never the
-bottleneck at the edge.** In nearly every configuration measured here it sat idle
-while the pipeline fought PCIe transfers, protobuf serialisation and interpreter
-locks. Optimising the model is usually not where the frames are.
+A recurring theme is worth stating in advance: **the GPU is rarely the first
+bottleneck at the edge.** At the stream counts most deployments run, it sat mostly
+idle while the pipeline fought PCIe transfers, protobuf serialisation and
+interpreter locks. It saturates only near a pipeline's capacity — ~80% busy at 16
+flat-out streams, 99–100% at 48 live cameras, where the 3090 also runs into its
+350 W power limit. Optimising the model is usually not where the frames are.
 
 ---
 

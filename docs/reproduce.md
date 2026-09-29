@@ -25,9 +25,12 @@ recipe: [`docker/README.md`](../docker/README.md).
 
 !!! warning "Take the GPU lock before measuring anything"
 
-    Two workloads on one GPU corrupt each other's numbers, and not subtly: this
-    study measured sharing at **~24% error**, bigger than most of the effects it
-    reports. So GPU work is serialised, never "balanced".
+    Two workloads on one machine corrupt each other's numbers, and not subtly: a
+    second GPU process raises A2's latency **69%** ([contention](contention.md)),
+    and even an unrelated CPU-only job on the host made B2 read **23–29% slow** on
+    identical seeds ([re-check](live-batching.md#re-checked-after-a-client-leak)) —
+    bigger than most of the effects this study reports. So GPU work is serialised,
+    never "balanced", and the host CPU should be quiet too.
     [`scripts/gpu_lock.sh`](../scripts/gpu_lock.sh) is a `mkdir`-atomic lock at
     `/home/suchi/sadbodh/.gpu-lock` (override with `GPU_LOCK`) with an `owner`
     file recording who holds it, why, and since when.
@@ -76,7 +79,7 @@ docker exec triton-server bash -c 'cd /work/cpp/build && ./trt_grpc_cuda --mode 
 docker exec triton-server bash -c 'cd /work && python3 client_v2.py --mode file --file cpp/build/frames.bin --model yolov8s --transfer sys --streams 4 --processes 4 --duration 8'
 # D: async + dynamic batching (single model)
 docker exec triton-server bash -c 'cd /work/cpp/build && ./trt_grpc_async --model yolov8s_dyn --file frames.bin --streams 8 --duration 10'
-# D multi-model (Triton production scenario, 3 models x async batching)
+# D multi-model (3 models x async batching; A2 --engines at batch 8 beats it, see batch8/multimodel scripts below)
 docker exec triton-server bash -c 'cd /work/cpp/build && ./trt_grpc_async --models yolov8n_dyn,yolov8s_dyn,yolo11n_dyn --file frames.bin --streams 18 --duration 10'
 # E: DeepStream (ds-build container)
 docker exec ds-build bash -c 'cd /tmp && ./ds_bench --config /opt/ds/model/yolov8s/config_infer_primary_yolov8s.txt --streams 1 --batch 1 --duration 15'
@@ -86,18 +89,40 @@ docker exec ds-build bash -c 'cd /tmp && ./ds_bench --config /opt/ds/model/yolov
 
 ```bash
 scripts/parallel_test.sh 8 3    # multi-instance contention, N=3 -> results/v3/
+scripts/mps_contention.sh       # MPS off/on A/B (usage: [duration] [N]; published at N=3)
 scripts/pa_sweep.sh yolov8s "1 2 4 8 16"   # perf_analyzer sweep
 scripts/gpu_sample.sh out.csv 30           # GPU util/mem sampling during a run
 ```
+
+The harnesses behind the later pages. Arguments are in each script's header;
+scripts without a usage line there are listed bare:
+
+| Page | Script | What it runs |
+|---|---|---|
+| [Live traffic (B3)](live-batching.md) | `scripts/b3_paced.sh` | paced (live-camera) mode: B2, B3 and D's config, unsynchronised and synchronised |
+| [Live traffic (B3)](live-batching.md) | `scripts/a2_paced.sh` | A2 on the same paced clock and seeded phases |
+| [Live traffic (B3)](live-batching.md) | `scripts/util_paced.sh` | GPU utilisation, SM clock and power at each paced load |
+| [Live traffic (B3)](live-batching.md) | `scripts/leakfix_check.sh`, `python3 scripts/leakfix_compare.py [repo_root]` | the post-leak-fix re-check and its scoring |
+| [Batching](batching.md) | `scripts/batch8_a2_vs_d.sh` | A2 at batch 1 and 8 against D, one model |
+| [Batching](batching.md) | `scripts/multimodel_a2_vs_d.sh` | three models: A2 in one process against D |
+| [Batching](batching.md) | `scripts/batching_knobs.sh [duration] [streams]` | `preferred_batch_size` × `max_queue_delay_microseconds` |
+| [Triton tuning](triton-tuning.md) | `scripts/triton_knobs.sh [duration] [streams]` | `instance_group count` × server-side CUDA graphs |
+| [CUDA graphs](cuda-graphs.md) | `scripts/cuda_graphs.sh [duration] [repeats]`, `scripts/cuda_graphs_pipeline.sh` | engine-level A/B, then inside A2 |
+| [Accuracy](accuracy.md) | `scripts/accuracy_eval.py`, `scripts/accuracy_reference.py` | COCO mAP of the study chain, and the ultralytics control |
+| [Precision](precision.md) | `scripts/precision_ceilings.sh [models...]`, `scripts/build_int8_engine.py` | uncalibrated speed ceilings; the calibrated INT8 engine |
+| [Decoder capacity](nvdec.md) | `scripts/nvdec_capacity.sh` | NVDEC sessions × resolution |
+
+Paced sweeps call `scripts/shm_clear.sh [http_port]` before each client run to clear
+leftover CUDA shared-memory regions.
 
 ## Source → binary map
 
 | Source | Binary | Flow |
 |---|---|---|
 | `cpp/src/main.cpp` | `trt_pipeline` | A1 — C++ TRT, CPU path |
-| `cpp/src/main_cuda.cu` | `trt_pipeline_cuda` | A2 — C++ TRT, full-CUDA |
+| `cpp/src/main_cuda.cu` | `trt_pipeline_cuda` | A2 — C++ TRT, full-CUDA (also `--batch 8`, `--engines` for several models in one process, `--mode paced`, `--cuda-graph`) |
 | `cpp/src/grpc_client.cpp` | `trt_grpc_client` | B1 — Triton + C++, raw gRPC |
-| `cpp/src/grpc_client_cuda.cu` | `trt_grpc_cuda` | B2 (and D-sync) — CUDA shm |
+| `cpp/src/grpc_client_cuda.cu` | `trt_grpc_cuda` | B2, and B3 with `--mode paced` — CUDA shm |
 | `cpp/src/grpc_async_client.cu` | `trt_grpc_async` | D — async, 8 in-flight |
 | `cpp/src/ds_bench.cpp` | `ds_bench` | E1/E2 — DeepStream |
 | `triton/client_v2.py` | — | C2 (`--transfer raw\|sys\|cuda`) |

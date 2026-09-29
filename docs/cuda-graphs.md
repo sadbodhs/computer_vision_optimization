@@ -36,7 +36,7 @@ three models of quite different cost:
 | YOLOv8s | 0.986 | 0.858 | **0.128 ms** |
 | YOLO11n | 0.798 | 0.628 | **0.170 ms** |
 
-That is the tell: **CUDA Graphs removes a roughly constant ~0.13 ms of
+That is the tell: **CUDA Graphs removes a roughly constant ~0.13–0.17 ms of
 per-iteration launch overhead.** It reads as +15% on YOLOv8s and +23% on YOLOv8n
 only because the same fixed cost is a larger share of a cheaper model's budget.
 
@@ -67,8 +67,9 @@ hits both equally instead of accumulating in whichever ran second.
 | 4 | off | 1166.9 | 3.426 ms | 3.875 ms | 2.797 ms |
 | 4 | **on** | **1248.9** (+7.0%) | **3.205 ms** | **3.440 ms** (−11.2%) | 2.375 ms |
 
-5 repeats at 1 stream, 3 at 2 and 4. Detections per frame held at **1.597 in
-every single run, both arms** — the invariant that separates "faster" from
+5 repeats at 1 stream, 3 at 2 and 4. Detections per frame held at **1.597–1.598
+in every 1-stream run, both arms**, and 1.594–1.606 (a 0.7% spread) at 2 and 4
+streams — the invariant that separates "faster" from
 "quietly doing less work".
 
 ### The projection was right, and the reason is better than the number
@@ -84,7 +85,7 @@ The more interesting part is *which* numbers those are. Compare them to the
 | plain | 0.986 ms | 0.982 ms |
 | with graphs | 0.858 ms | 0.851 ms |
 
-**A2's inference stage is the engine benchmark**, to within 0.5%. Nothing was
+**A2's inference stage is the engine benchmark**, to within 1%. Nothing was
 hiding inside it — no stray synchronisation, no framework cost, nothing for the
 pipeline to be blamed for. That is worth stating plainly because it is the one
 place in this whole study where a hand-rolled pipeline reaches the synthetic
@@ -106,9 +107,12 @@ on the pipeline instead of the model.
 
 ### Graphs raise the plateau — it was partly launch-bound
 
-A2 saturates at **~1167 fps** without graphs and **~1249 fps** with them. The
-ceiling that concurrency alone could not push past was not the GPU running out
-of work; some of it was the CPU failing to feed it fast enough.
+In this session A2 saturates at **~1167 fps** without graphs and **~1249 fps**
+with them (the published batch-1 plateau is 1,192–1,219 fps). The ceiling that
+concurrency alone could not push past was not the GPU running out of work; some of
+it was the CPU failing to feed it fast enough. Much more of it is batch size: the
+same pipeline at batch 8 reaches 1,622 fps
+([batching](batching.md#correction-the-throughput-lead-is-batching-not-triton)).
 
 ### And the gain shrinks with concurrency, exactly as it did in Triton
 
@@ -162,7 +166,8 @@ the floor. More precisely:
 | Ceiling with launch overhead removed | **0.86 ms · 1166 qps** |
 
 The published number remains the right baseline for *this study*, because every
-flow measured here launches per frame. It just is not a hardware floor.
+batch-1 flow measured here launches per frame (batch-8 flows have their own
+0.61 ms/frame floor). It just is not a hardware floor.
 
 ---
 
