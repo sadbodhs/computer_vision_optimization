@@ -11,7 +11,9 @@ measured, not estimated, and links to where it comes from.
 moment each frame is due, upload included). Latencies are medians of three seeded
 repeats; GPU utilisation is `nvidia-smi` from one run
 ([§7](live-batching.md#7-how-busy-the-gpu-was)). Cameras are unsynchronised unless
-a rule says otherwise. On another GPU the fps figures move, but the rules hold when
+a rule says otherwise. The [camera frame rate](#by-camera-frame-rate) section
+scales these 30 fps measurements to other camera rates and says where that holds.
+On another GPU the fps figures move, but the rules hold when
 load is read as a percentage of *your* measured capacity — see the last section.
 
 ---
@@ -89,6 +91,74 @@ the *Run* column.
 | > ~1,450 fps (> 48) | 100%, 348/350 W | **Another GPU**, INT8 or a smaller model | ≥ 84 ms at 1,680 fps, rising | — |
 | Synchronised, ≥ 8 cameras | — | **Batching** (D's settings: lowest p99) | 16 cameras: 11.7 / 12.8 ms | — |
 | Offline | — | **Batch 8**: A2 in-process, or D | ~1,620 fps (1 model) · 2,280 (3 models) | — |
+
+## By camera frame rate
+
+Every measurement here used 30 fps cameras. Camera rate changes two things, and
+they scale differently:
+
+- **The work** is total frames per second, cameras × fps. The GPU does the same
+  work per frame whatever the camera's rate, so the capacities above hold in fps:
+  100 cameras at 10 fps are the same 1,000 fps load as 33 at 30.
+- **The budget** is the frame interval: 200 ms at 5 fps, 33 ms at 30, 8.3 ms at
+  120. A batching window that is noise at 10 fps can use up the whole frame at 120.
+
+**Cameras per 3090**, from the safe loads in the rules (one-frame pipelines at
+~75% of capacity, batching at ~87%):
+
+| Camera fps | Frame budget | A2 (≤ 960 fps) | B2 (≤ ~830 fps) | Batching (≤ 1,440 fps) | Batching window that fits |
+|---|---|---|---|---|---|
+| 5 | 200 ms | 192 | 166 | 288 | any, including D's 5 ms |
+| 10 | 100 ms | 96 | 83 | 144 | any |
+| 15 | 67 ms | 64 | 55 | 96 | any |
+| 30 | 33 ms | 32 | 27 | 48 | up to 5 ms (measured) |
+| 60 | 16.7 ms | 16 | 13 | 24 | 0–500 µs; D's settings take half the budget or more (p99 8.4–12.6 ms) |
+| 120 | 8.3 ms | 8 | 6 | 12 | 0 µs, or no batching (A2) |
+
+**Which pipeline a camera rate allows.** Keep a pipeline's p99 under half the
+frame interval, so a late frame still lands before the next one. From the measured
+p99s below capacity:
+
+| Pipeline | p99 below capacity (measured) | Suits cameras up to |
+|---|---|---|
+| A2 | 2.0–4.3 ms | ~115 fps |
+| B2 | 2.8–4.0 ms at light load · 7.9 ms at 960 fps | ~120 fps light · ~60 fps near its limit |
+| B3 · 0 µs | 3.1–4.8 ms at light load · 9.1 ms at 960 fps | ~100 fps light · ~55 fps near its limit |
+| D's settings (5 ms window) | 8.4–9.9 ms · 12.6 ms at 1,440 fps | ~50 fps · ~40 fps near capacity |
+
+So a slow camera can afford any pipeline and should be chosen on operations (do
+you need a server?) and on total load; a fast camera rules out long batching
+windows, whatever the load.
+
+### Worked examples
+
+| Deployment | Total load | Run | Expect p50 / p99 | Budget | Watch for |
+|---|---|---|---|---|---|
+| Robot, 2 cameras × 60 fps | 120 fps | **A2** | 1.6 / 2.0 ms | 16.7 ms | nothing: 9% of A2's capacity |
+| Retail, 20 cameras × 15 fps | 300 fps | **A2**, or B2 / B3 if you want a server | A2 ~1.5 / ~2.5 ms | 67 ms | nothing: GPU ~30% busy |
+| High-speed inspection, 4 cameras × 120 fps | 480 fps | **A2** | 1.5 / 3.4 ms | 8.3 ms | D is ruled out (5.8 / 8.5 ms at this load); B3 · 0 µs (2.7 / 4.8 ms) fits only just |
+| Traffic, 48 cameras × 30 fps | 1,440 fps | **Batching, D's settings** | 9.0 / 12.6 ms | 33 ms | measured point; A2 and B2 are seconds behind here |
+| Warehouse, 100 cameras × 10 fps | 1,000 fps | **Batching, 500 µs window** (B3) | ~5.6 / ~8 ms | 100 ms | the decoder: NVDEC tops out at ~768 fps at 1080p, so use 720p or lower streams, or a second GPU ([decoder capacity](nvdec.md)) |
+| City, 300 cameras × 5 fps | 1,500 fps | **Two GPUs**, or batching on INT8 | — | 200 ms | past 87% of batching capacity on one 3090; INT8's engine is 32.8% faster, but INT8 through the pipelines is not measured |
+
+*Measured values where a row's total load was measured (120, 480, 1,440 fps);
+"~" marks an interpolation between the two nearest measured loads.*
+
+**Where this scaling is only approximate.** Capacity and light-load latency carry
+over by total fps, because they depend on the work per frame. Three things do not:
+
+- **Latency near capacity depends on how frames arrive.** Many slow cameras arrive
+  more smoothly than a few fast ones, so near capacity these figures are likely a
+  little pessimistic for 5–15 fps cameras and a little optimistic for 60–120 fps.
+- **Synchronised bursts scale with the number of cameras, not total fps.** 100
+  cameras triggered together at 10 fps is a burst of 100 frames; the largest burst
+  measured was 48.
+- **A2 runs one execution context per camera.** Beyond the 56 cameras measured
+  (192 at 5 fps, say), its memory and scheduling are untested; one A2 process that
+  batches across cameras would avoid it.
+
+None of these rows was run at its own camera rate. Treat the table as sizing, and
+confirm on your own traffic before committing hardware.
 
 ## How latency grows with load
 

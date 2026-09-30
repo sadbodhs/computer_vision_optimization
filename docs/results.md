@@ -128,6 +128,14 @@ B3 is B2's synchronous client in front of a short-window dynamic batcher.*
 *Circled: the pipeline with the lowest turnaround at each load — it changes with
 the load. Per-load picks: [choosing A2, B2 or B3](live-batching.md#6-choosing-a2-b2-or-b3-at-each-load).*
 
+**Other camera rates.** Capacity is total frames per second, so the same GPU
+serves more slow cameras: at the safe loads, one 3090 carries about 96 cameras at
+10 fps on A2 (32 at 30 fps, 16 at 60) and 144 at 10 fps with batching (48 at 30,
+24 at 60). What changes with the rate is the budget: a 5 ms batching window is
+noise against a 10 fps camera's 100 ms and fatal against a 120 fps camera's
+8.3 ms. Tables and worked examples, derived from these 30 fps measurements:
+[sizing rules by camera frame rate](sizing-rules.md#by-camera-frame-rate).
+
 DeepStream's single-stream latency (1.50 ms, RTSP mode) is on the
 [DeepStream](deepstream.md) page; it was not run in paced mode.
 
